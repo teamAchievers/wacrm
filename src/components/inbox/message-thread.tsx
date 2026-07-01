@@ -26,6 +26,7 @@ import {
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
+  Bot,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { Badge } from "@/components/ui/badge";
@@ -73,6 +74,10 @@ interface MessageThreadProps {
   onAssignChange: (
     conversationId: string,
     assignedAgentId: string | null,
+  ) => void;
+  onChatbotToggle: (
+    conversationId: string,
+    chatbotEnabled: boolean,
   ) => void;
   /**
    * On mobile, the thread is shown full-screen with the conversation list
@@ -159,6 +164,7 @@ export function MessageThread({
   onUpdateMessage,
   onStatusChange,
   onAssignChange,
+  onChatbotToggle,
   onBack,
   resyncToken = 0,
   onRefresh,
@@ -778,6 +784,30 @@ export function MessageThread({
     [conversation, onAssignChange],
   );
 
+  const handleChatbotToggleClick = useCallback(async () => {
+    if (!conversation) return;
+    const nextVal = !conversation.chatbot_enabled;
+
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("conversations")
+      .update({ chatbot_enabled: nextVal })
+      .eq("id", conversation.id);
+
+    if (error) {
+      console.error("Failed to toggle chatbot:", error);
+      toast.error("Failed to toggle chatbot");
+      return;
+    }
+
+    onChatbotToggle(conversation.id, nextVal);
+    toast.success(
+      nextVal
+        ? "AI Chatbot enabled for this chat"
+        : "AI Chatbot disabled for this chat",
+    );
+  }, [conversation, onChatbotToggle]);
+
   // Empty state — same WhatsApp-style doodle background as the active
   // thread below, so swapping between empty/selected doesn't change the
   // pattern under the user's eye.
@@ -904,6 +934,23 @@ export function MessageThread({
               />
             </button>
           )}
+
+          {/* Chatbot toggle */}
+          <button
+            type="button"
+            onClick={handleChatbotToggleClick}
+            aria-label="Toggle AI assistant"
+            title={conversation.chatbot_enabled !== false ? "Disable AI for this chat" : "Enable AI for this chat"}
+            className={cn(
+              "inline-flex h-7 items-center justify-center gap-1.5 px-2 text-xs rounded-md border transition-colors",
+              conversation.chatbot_enabled !== false
+                ? "bg-green-500/10 border-green-500/20 text-green-500 hover:bg-green-500/20"
+                : "bg-muted border-border text-muted-foreground hover:bg-muted/80"
+            )}
+          >
+            <Bot className="h-3.5 w-3.5" />
+            <span>{conversation.chatbot_enabled !== false ? "AI Active" : "AI Paused"}</span>
+          </button>
 
           {/* Status dropdown */}
           <DropdownMenu>

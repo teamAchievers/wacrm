@@ -11,6 +11,8 @@ import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
+import { handleChatbotReply } from '@/lib/chatbot/engine'
+
 
 // Lazy-initialized to avoid build-time crash when env vars are missing
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -713,7 +715,15 @@ async function processMessage(
       },
     }).catch((err) => console.error('[automations] dispatch failed:', err))
   }
+
+  // Trigger AI Chatbot reply asynchronously if message was not consumed by a flow
+  if (!flowConsumed && contentType === 'text' && inboundText) {
+    handleChatbotReply(accountId, conversation.id, contactRecord.id, inboundText).catch((err) =>
+      console.error('[chatbot] reply handling failed:', err)
+    )
+  }
 }
+
 
 async function parseMessageContent(
   message: WhatsAppMessage,

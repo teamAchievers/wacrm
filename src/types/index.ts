@@ -153,6 +153,7 @@ export interface Conversation {
   last_message_text?: string;
   last_message_at?: string;
   unread_count: number;
+  chatbot_enabled?: boolean;
   created_at: string;
   updated_at: string;
   contact?: Contact;
@@ -225,6 +226,19 @@ export interface WhatsAppConfig {
   /** Last error from /register; cleared on success. */
   last_registration_error?: string;
 }
+
+export interface ChatbotConfig {
+  id: string;
+  account_id: string;
+  is_enabled: boolean;
+  provider: 'gemini' | 'openai';
+  api_key?: string;
+  system_prompt: string;
+  handoff_keywords: string;
+  created_at: string;
+  updated_at: string;
+}
+
 
 // Raw Meta status enum. We persist this verbatim from Meta (sync + webhook)
 // rather than collapsing to a local TitleCase set — distinctions like
