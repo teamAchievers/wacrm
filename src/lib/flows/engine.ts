@@ -32,6 +32,14 @@
  *     INSERT raises 23505 and the runner catches & exits.
  */
 
+import { decrypt } from "@/lib/whatsapp/encryption";
+import {
+  sanitizePhoneForMeta,
+  isValidE164,
+  phoneVariants,
+  isRecipientNotAllowedError,
+} from "@/lib/whatsapp/phone-utils";
+import { sendTextMessage } from "@/lib/whatsapp/meta-api";
 import { supabaseAdmin } from "./admin-client";
 import {
   engineSendInteractiveButtons,
@@ -435,7 +443,7 @@ async function executeHandoff(
   run: FlowRunRow,
   node: FlowNodeRow,
 ): Promise<void> {
-  const cfg = node.config as { assign_to?: string; note?: string };
+  const cfg = node.config as { assign_to?: string; note?: string; notify_phone?: string };
   const convUpdate: Record<string, unknown> = {
     status: "pending",
     updated_at: new Date().toISOString(),
@@ -451,6 +459,46 @@ async function executeHandoff(
     note: cfg.note ?? null,
     assigned_to: cfg.assign_to ?? null,
   });
+
+  // Send WhatsApp notification to the configured admin phone number if present
+  if (cfg.notify_phone) {
+    try {
+      const sanitizedPhone = sanitizePhoneForMeta(cfg.notify_phone);
+      if (isValidE164(sanitizedPhone)) {
+        const { data: config } = await db
+          .from("whatsapp_config")
+          .select("*")
+          .eq("account_id", run.account_id)
+          .single();
+
+        if (config) {
+          const accessToken = decrypt(config.access_token);
+          const rawNote = cfg.note || "New qualified lead has been handed off.";
+          const interpolatedNote = interpolateVars(rawNote, run.vars);
+          const text = `🔔 *Lead Notification*\n\n${interpolatedNote}`;
+
+          const variants = phoneVariants(sanitizedPhone);
+          for (const v of variants) {
+            try {
+              await sendTextMessage({
+                phoneNumberId: config.phone_number_id,
+                accessToken,
+                to: v,
+                text,
+              });
+              break;
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (!isRecipientNotAllowedError(msg)) throw err;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("[flows] Failed to send handoff WhatsApp notification:", e);
+    }
+  }
+
   await endRun(db, run.id, "handed_off", "handoff_node");
 }
 

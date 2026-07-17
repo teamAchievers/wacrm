@@ -191,12 +191,28 @@ export function NodeConfigForm({
 
     case "handoff":
       return (
-        <TextRow
-          label="Internal note (for the agent picking up)"
-          value={(cfg as { note?: string }).note ?? ""}
-          onChange={(v) => onUpdateConfig({ note: v })}
-          rows={2}
-        />
+        <div className="space-y-4">
+          <TextRow
+            label="Internal note (for the agent picking up)"
+            value={(cfg as { note?: string }).note ?? ""}
+            onChange={(v) => onUpdateConfig({ note: v })}
+            rows={2}
+          />
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              Notify via WhatsApp (Admin Phone Number)
+            </label>
+            <Input
+              value={(cfg as { notify_phone?: string }).notify_phone ?? ""}
+              onChange={(e) => onUpdateConfig({ notify_phone: e.target.value })}
+              placeholder="e.g. +919876543210"
+              className="bg-muted"
+            />
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              Optional. Sends a WhatsApp message containing the note to this number when the lead qualifies.
+            </p>
+          </div>
+        </div>
       );
 
     case "end":
