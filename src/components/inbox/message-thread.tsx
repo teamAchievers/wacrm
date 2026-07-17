@@ -47,6 +47,7 @@ import {
 } from "./message-composer";
 import { deleteAccountMedia } from "@/lib/storage/upload-media";
 import { TemplatePicker } from "./template-picker";
+import { FlowPicker } from "./flow-picker";
 import { buildReplyPreview } from "./reply-quote";
 import { toast } from "sonner";
 
@@ -176,6 +177,7 @@ export function MessageThread({
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [flowModalOpen, setFlowModalOpen] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
   // Purely visual spin state for the manual-refresh button. The actual
@@ -1124,6 +1126,7 @@ export function MessageThread({
         onSend={handleSend}
         onSendMedia={handleSendMedia}
         onOpenTemplates={handleOpenTemplates}
+        onOpenFlows={() => setFlowModalOpen(true)}
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}
       />
@@ -1133,6 +1136,17 @@ export function MessageThread({
         onOpenChange={setTemplateModalOpen}
         onSelect={handleSendTemplate}
       />
+
+      {contact && (
+        <FlowPicker
+          open={flowModalOpen}
+          onOpenChange={setFlowModalOpen}
+          contactId={contact.id}
+          onTriggered={() => {
+            onRefresh?.();
+          }}
+        />
+      )}
     </div>
   );
 }

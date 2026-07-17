@@ -18,6 +18,7 @@ import {
   Square,
   X,
   Loader2,
+  Workflow,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
@@ -96,6 +97,7 @@ interface MessageComposerProps {
   onSend: (text: string, replyToId?: string) => void;
   onSendMedia: (payload: SendMediaPayload) => void;
   onOpenTemplates: () => void;
+  onOpenFlows?: () => void;
   replyTo?: ReplyDraft | null;
   onClearReply?: () => void;
 }
@@ -117,6 +119,7 @@ export function MessageComposer({
   onSend,
   onSendMedia,
   onOpenTemplates,
+  onOpenFlows,
   replyTo,
   onClearReply,
 }: MessageComposerProps) {
@@ -522,6 +525,20 @@ export function MessageComposer({
           >
             <LayoutTemplate className="h-4 w-4" />
           </GatedButton>
+
+          {onOpenFlows && (
+            <GatedButton
+              variant="ghost"
+              size="sm"
+              canAct={!readOnly}
+              gateReason="send messages"
+              title={readOnly ? undefined : "Trigger flow"}
+              className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+              onClick={onOpenFlows}
+            >
+              <Workflow className="h-4 w-4" />
+            </GatedButton>
+          )}
 
           <textarea
             ref={textareaRef}

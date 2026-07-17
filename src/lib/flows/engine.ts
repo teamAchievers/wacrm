@@ -1168,3 +1168,89 @@ async function startNewRun(
     outcome: outcome.outcome === "advanced" ? "started" : outcome.outcome,
   };
 }
+
+export async function manuallyStartFlowRun(
+  accountId: string,
+  userId: string,
+  flowId: string,
+  contactId: string,
+): Promise<{ success: boolean; error?: string; runId?: string }> {
+  const db = supabaseAdmin();
+
+  // 1. Load flow
+  const flow = await loadFlow(db, flowId);
+  if (!flow || !flow.entry_node_id) {
+    return { success: false, error: "Flow not found or has no entry node" };
+  }
+  if (flow.account_id !== accountId) {
+    return { success: false, error: "Unauthorized" };
+  }
+
+  // 2. Load contact to ensure it exists
+  const { data: contact } = await db
+    .from("contacts")
+    .select("id, phone")
+    .eq("id", contactId)
+    .eq("account_id", accountId)
+    .maybeSingle();
+  if (!contact) {
+    return { success: false, error: "Contact not found" };
+  }
+
+  // 3. Find or create conversation for this contact
+  let { data: conv } = await db
+    .from("conversations")
+    .select("id")
+    .eq("contact_id", contactId)
+    .eq("account_id", accountId)
+    .maybeSingle();
+
+  if (!conv) {
+    const { data: newConv } = await db
+      .from("conversations")
+      .insert({
+        contact_id: contactId,
+        account_id: accountId,
+        status: "open",
+      })
+      .select("id")
+      .maybeSingle();
+    conv = newConv;
+  }
+  const conversationId = conv?.id;
+  if (!conversationId) {
+    return { success: false, error: "Failed to find or create conversation" };
+  }
+
+  // 4. Check for active run and terminate it if it exists so we can trigger the new one
+  const activeRun = await loadActiveRunForContact(db, accountId, contactId);
+  if (activeRun) {
+    await endRun(db, activeRun.id, "failed", "manually_retriggered");
+  }
+
+  // 5. Load all nodes for the flow
+  const nodes = await loadAllNodes(db, flow.id);
+
+  // 6. Start the run
+  const res = await startNewRun(
+    db,
+    flow,
+    {
+      accountId,
+      userId,
+      contactId,
+      conversationId,
+      message: {
+        kind: "text",
+        meta_message_id: `manual-trigger-${Date.now()}`,
+        text: "Manually triggered flow",
+      },
+    },
+    nodes,
+  );
+
+  if (res.flow_run_id) {
+    return { success: true, runId: res.flow_run_id };
+  }
+  return { success: false, error: "Failed to start flow execution" };
+}

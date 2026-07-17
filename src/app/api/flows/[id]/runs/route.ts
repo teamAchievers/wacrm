@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { manuallyStartFlowRun } from '@/lib/flows/engine'
 
 /**
  * GET /api/flows/[id]/runs
@@ -83,4 +84,45 @@ export async function GET(
     runs: runs ?? [],
     events,
   })
+}
+
+export async function POST(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const { id: flowId } = await context.params
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const { contact_id } = await request.json().catch(() => ({ contact_id: null }))
+  if (!contact_id) {
+    return NextResponse.json({ error: 'Missing contact_id' }, { status: 400 })
+  }
+
+  // Resolve account_id
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('account_id')
+    .eq('user_id', user.id)
+    .single()
+  const accountId = profile?.account_id as string | undefined
+  if (!accountId) {
+    return NextResponse.json(
+      { error: 'Your profile is not linked to an account.' },
+      { status: 403 },
+    )
+  }
+
+  const res = await manuallyStartFlowRun(accountId, user.id, flowId, contact_id)
+  if (!res.success) {
+    return NextResponse.json({ error: res.error }, { status: 400 })
+  }
+
+  return NextResponse.json({ success: true, runId: res.runId })
 }
