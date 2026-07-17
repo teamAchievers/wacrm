@@ -540,11 +540,217 @@ const UNBOX_LEAD_QUALIFIER: FlowTemplate = {
 // Registry
 // ============================================================
 
+// ============================================================
+// 5. Unbox Qualifier — Meta Ad → WhatsApp consultation flow
+// ============================================================
+const UNBOX_QUALIFIER: FlowTemplate = {
+  slug: "unbox_qualifier",
+  name: "Unbox Qualifier",
+  description:
+    "For Meta Ad leads who've already submitted their details via Instant Form. Skips data collection — focuses on qualifying goals, service needs, and readiness for a personalised consultation.",
+  icon: "UserPlus",
+  trigger_type: "first_inbound_message",
+  trigger_config: {},
+  entry_node_id: "start",
+  nodes: [
+    {
+      node_key: "start",
+      node_type: "start",
+      config: { next_node_key: "welcome" },
+    },
+    // Node 1 — Welcome
+    {
+      node_key: "welcome",
+      node_type: "send_message",
+      config: {
+        text: "👋 Hi! Thanks for reaching out to Unbox Studio!\n\nWe've received your business details and appreciate your interest. 🙏\n\nTo recommend the right growth strategy for your business, we'd love to understand your goals better.\n\nIt'll take less than a minute — and based on your answers, our team will prepare *personalised recommendations* just for you.\n\n🚀 Let's get started!",
+        next_node_key: "ask_goal",
+      } as SendMessageNodeConfig,
+    },
+    // Node 2 — Primary Goal
+    {
+      node_key: "ask_goal",
+      node_type: "send_list",
+      config: {
+        text: "🎯 What's your *primary business goal* right now?",
+        button_label: "Select your goal",
+        sections: [
+          {
+            title: "Business Goals",
+            rows: [
+              { reply_id: "goal_leads", title: "Generate More Leads", next_node_key: "ask_service" },
+              { reply_id: "goal_sales", title: "Increase Sales", next_node_key: "ask_service" },
+              { reply_id: "goal_brand", title: "Build Brand Awareness", next_node_key: "ask_service" },
+              { reply_id: "goal_social", title: "Grow Social Media", next_node_key: "ask_service" },
+              { reply_id: "goal_launch", title: "Launch a New Business", next_node_key: "ask_service" },
+              { reply_id: "goal_unsure", title: "Not Sure (Need Guidance)", next_node_key: "ask_service" },
+            ],
+          },
+        ],
+      } as SendListNodeConfig,
+    },
+    // Node 3 — Service Interest
+    {
+      node_key: "ask_service",
+      node_type: "send_list",
+      config: {
+        text: "🛠️ Which service are you looking for?",
+        button_label: "Select a service",
+        sections: [
+          {
+            title: "Our Services",
+            rows: [
+              { reply_id: "svc_perf", title: "🚀 Performance Mktg", next_node_key: "ask_industry" },
+              { reply_id: "svc_social", title: "📱 Social Media Mgmt", next_node_key: "ask_industry" },
+              { reply_id: "svc_web", title: "🌐 Website Dev", next_node_key: "ask_industry" },
+              { reply_id: "svc_brand", title: "🎨 Branding & Creative", next_node_key: "ask_industry" },
+              { reply_id: "svc_seo", title: "📈 SEO", next_node_key: "ask_industry" },
+              { reply_id: "svc_full", title: "🤝 Full Mktg Solution", next_node_key: "ask_industry" },
+              { reply_id: "svc_recommend", title: "🤔 Expert Recommendation", next_node_key: "ask_industry" },
+            ],
+          },
+        ],
+      } as SendListNodeConfig,
+    },
+    // Node 4 — Industry
+    {
+      node_key: "ask_industry",
+      node_type: "send_list",
+      config: {
+        text: "🏢 Which industry best describes your business?",
+        button_label: "Select industry",
+        sections: [
+          {
+            title: "Industries",
+            rows: [
+              { reply_id: "ind_travel", title: "Travel", next_node_key: "ask_marketing" },
+              { reply_id: "ind_realestate", title: "Real Estate", next_node_key: "ask_marketing" },
+              { reply_id: "ind_education", title: "Education", next_node_key: "ask_marketing" },
+              { reply_id: "ind_healthcare", title: "Healthcare", next_node_key: "ask_marketing" },
+              { reply_id: "ind_construction", title: "Construction", next_node_key: "ask_marketing" },
+              { reply_id: "ind_ecommerce", title: "E-commerce", next_node_key: "ask_marketing" },
+              { reply_id: "ind_finance", title: "Finance", next_node_key: "ask_marketing" },
+              { reply_id: "ind_mfg", title: "Manufacturing", next_node_key: "ask_marketing" },
+              { reply_id: "ind_personal", title: "Personal Brand", next_node_key: "ask_marketing" },
+              { reply_id: "ind_other", title: "Other", next_node_key: "ask_marketing" },
+            ],
+          },
+        ],
+      } as SendListNodeConfig,
+    },
+    // Node 5 — Current Marketing
+    {
+      node_key: "ask_marketing",
+      node_type: "send_list",
+      config: {
+        text: "📊 How are you currently generating customers?",
+        button_label: "Select one",
+        sections: [
+          {
+            title: "Current Marketing",
+            rows: [
+              { reply_id: "mkt_referrals", title: "Mostly Referrals", next_node_key: "ask_challenge" },
+              { reply_id: "mkt_social", title: "Social Media", next_node_key: "ask_challenge" },
+              { reply_id: "mkt_meta", title: "Meta Ads", next_node_key: "ask_challenge" },
+              { reply_id: "mkt_google", title: "Google Ads", next_node_key: "ask_challenge" },
+              { reply_id: "mkt_seo", title: "SEO", next_node_key: "ask_challenge" },
+              { reply_id: "mkt_cold", title: "Cold Calling", next_node_key: "ask_challenge" },
+              { reply_id: "mkt_none", title: "Not Doing Marketing Yet", next_node_key: "ask_challenge" },
+            ],
+          },
+        ],
+      } as SendListNodeConfig,
+    },
+    // Node 6 — Biggest Challenge
+    {
+      node_key: "ask_challenge",
+      node_type: "send_list",
+      config: {
+        text: "⚠️ What's stopping your business from growing faster?",
+        button_label: "Select a challenge",
+        sections: [
+          {
+            title: "Biggest Challenge",
+            rows: [
+              { reply_id: "ch_leads", title: "Not Enough Leads", next_node_key: "ask_timeline" },
+              { reply_id: "ch_convert", title: "Leads Don't Convert", next_node_key: "ask_timeline" },
+              { reply_id: "ch_visibility", title: "Low Brand Visibility", next_node_key: "ask_timeline" },
+              { reply_id: "ch_marketing", title: "Marketing Isn't Working", next_node_key: "ask_timeline" },
+              { reply_id: "ch_website", title: "Need Better Website", next_node_key: "ask_timeline" },
+              { reply_id: "ch_strategy", title: "Need Complete Strategy", next_node_key: "ask_timeline" },
+            ],
+          },
+        ],
+      } as SendListNodeConfig,
+    },
+    // Node 7 — Timeline
+    {
+      node_key: "ask_timeline",
+      node_type: "send_list",
+      config: {
+        text: "⏰ When are you planning to start?",
+        button_label: "Select timeline",
+        sections: [
+          {
+            title: "Start Timeline",
+            rows: [
+              { reply_id: "tl_now", title: "Immediately", next_node_key: "cta" },
+              { reply_id: "tl_2weeks", title: "Within 2 Weeks", next_node_key: "cta" },
+              { reply_id: "tl_1month", title: "Within 1 Month", next_node_key: "cta" },
+              { reply_id: "tl_exploring", title: "Just Exploring", next_node_key: "cta" },
+            ],
+          },
+        ],
+      } as SendListNodeConfig,
+    },
+    // Node 8 — CTA: Free Strategy Call
+    {
+      node_key: "cta",
+      node_type: "send_buttons",
+      config: {
+        text: "Thanks! 🎉\n\nBased on your responses, we'd love to discuss a *tailored growth plan* for your business.\n\nWould you like to schedule a *FREE 30-minute strategy consultation* with one of our experts?",
+        footer_text: "Our team will prepare personalised recommendations for you.",
+        buttons: [
+          { reply_id: "book_call", title: "📅 Book My Call", next_node_key: "handoff_book" },
+          { reply_id: "talk_expert", title: "💬 Talk to an Expert", next_node_key: "handoff_talk" },
+          { reply_id: "view_portfolio", title: "📂 View Portfolio", next_node_key: "portfolio" },
+        ],
+      } as SendButtonsNodeConfig,
+    },
+    // Portfolio shortcut
+    {
+      node_key: "portfolio",
+      node_type: "send_message",
+      config: {
+        text: "Here's a look at some of our recent work 🎨\n\n🔗 *Portfolio:* https://unboxstudio.in/portfolio\n\nFeel free to browse and reach out when you're ready to discuss your project!",
+        next_node_key: "handoff_talk",
+      } as SendMessageNodeConfig,
+    },
+    // Handoff — Book a Call
+    {
+      node_key: "handoff_book",
+      node_type: "handoff",
+      config: {
+        note: "🔥 HOT LEAD — Book Strategy Call\nGoal: {{vars.goal_leads}}{{vars.goal_sales}}{{vars.goal_brand}}{{vars.goal_social}}{{vars.goal_launch}}{{vars.goal_unsure}} | Service: {{vars.svc_perf}}{{vars.svc_social}}{{vars.svc_web}}{{vars.svc_brand}}{{vars.svc_seo}}{{vars.svc_full}}{{vars.svc_recommend}}\nTimeline: {{vars.tl_now}}{{vars.tl_2weeks}}{{vars.tl_1month}}{{vars.tl_exploring}}\n\nAction: Schedule FREE 30-min consultation ASAP.",
+      } as HandoffNodeConfig,
+    },
+    // Handoff — Talk to Expert
+    {
+      node_key: "handoff_talk",
+      node_type: "handoff",
+      config: {
+        note: "✅ QUALIFIED LEAD — Talk to Expert\nGoal: {{vars.goal_leads}}{{vars.goal_sales}}{{vars.goal_brand}}{{vars.goal_social}}{{vars.goal_launch}}{{vars.goal_unsure}} | Service: {{vars.svc_perf}}{{vars.svc_social}}{{vars.svc_web}}{{vars.svc_brand}}{{vars.svc_seo}}{{vars.svc_full}}{{vars.svc_recommend}}\nTimeline: {{vars.tl_now}}{{vars.tl_2weeks}}{{vars.tl_1month}}{{vars.tl_exploring}}",
+      } as HandoffNodeConfig,
+    },
+  ],
+};
+
 const TEMPLATES: Record<string, FlowTemplate> = {
   welcome_menu: WELCOME_MENU,
   faq_bot: FAQ_BOT,
   lead_capture: LEAD_CAPTURE,
   unbox_lead_qualifier: UNBOX_LEAD_QUALIFIER,
+  unbox_qualifier: UNBOX_QUALIFIER,
 };
 
 export function getFlowTemplate(slug: string): FlowTemplate | null {
