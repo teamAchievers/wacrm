@@ -272,6 +272,8 @@ export interface SendMediaMessageArgs {
   caption?: string
   /** Document-only. Shown in the recipient's chat as the file name. Ignored for image/video/audio. */
   filename?: string
+  /** Document-only. Public URL of a JPEG thumbnail shown as the doc preview. Generated from PDF page 1. */
+  thumbnail?: string
   contextMessageId?: string
 }
 
@@ -290,7 +292,7 @@ export interface SendMediaMessageArgs {
 export async function sendMediaMessage(
   args: SendMediaMessageArgs,
 ): Promise<MetaSendResult> {
-  const { phoneNumberId, accessToken, to, kind, link, caption, filename, contextMessageId } = args
+  const { phoneNumberId, accessToken, to, kind, link, caption, filename, thumbnail, contextMessageId } = args
   if (!link) throw new Error('sendMediaMessage requires a link.')
   const url = `${META_API_BASE}/${phoneNumberId}/messages`
 
@@ -300,6 +302,9 @@ export async function sendMediaMessage(
   const media: Record<string, unknown> = { link }
   if (caption && kind !== 'audio') media.caption = caption
   if (kind === 'document' && filename) media.filename = filename
+  // thumbnail is a public JPEG URL for the document preview (first PDF page).
+  // Meta renders it as the document card thumbnail on the recipient's device.
+  if (kind === 'document' && thumbnail) media.thumbnail = { link: thumbnail }
 
   const body: Record<string, unknown> = {
     messaging_product: 'whatsapp',

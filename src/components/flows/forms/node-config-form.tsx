@@ -32,6 +32,8 @@ import {
   Trash2,
   Upload,
   X,
+  Image as ImageIcon,
+  Link,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -872,6 +874,8 @@ function useUserTags(): UserTag[] {
 interface SendMediaCfg {
   media_type?: "image" | "video" | "document";
   media_url?: string;
+  /** Base64 JPEG thumbnail of first PDF page — auto-generated on upload. */
+  thumbnail_url?: string;
   caption?: string;
   filename?: string;
   next_node_key?: string;
@@ -903,12 +907,53 @@ function SendMediaForm({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [thumbnailLoading, setThumbnailLoading] = useState(false);
+  // "upload" = file picker mode, "url" = paste-a-URL mode
+  const [inputMode, setInputMode] = useState<"upload" | "url">(
+    cfg.media_url && !cfg.media_url.includes("supabase") ? "url" : "upload",
+  );
+  const [urlDraft, setUrlDraft] = useState(cfg.media_url ?? "");
 
   const mediaType = cfg.media_type ?? "image";
   const isDocument = mediaType === "document";
   const displayName =
     cfg.filename ||
     (cfg.media_url ? cfg.media_url.split("/").pop() ?? "" : "");
+
+  // ── Shared helper: render first page of a PDF (from ArrayBuffer) ──────────
+  async function generatePdfThumbnail(
+    source: ArrayBuffer | string, // ArrayBuffer for uploaded file, URL string for remote
+  ): Promise<string | undefined> {
+    try {
+      const pdfjsLib = await import("pdfjs-dist");
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+      const loadArgs =
+        typeof source === "string" ? { url: source } : { data: source };
+      const pdf = await pdfjsLib.getDocument(loadArgs).promise;
+      const page = await pdf.getPage(1);
+      const viewport = page.getViewport({ scale: 1.5 });
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return undefined;
+      // pdfjs-dist v4 requires `canvas` (the element) not `canvasContext`.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await page.render({ canvasContext: ctx as any, canvas, viewport } as any).promise;
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, "image/jpeg", 0.85),
+      );
+      if (!blob) return undefined;
+      const thumbFile = new File([blob], `thumb-${Date.now()}.jpg`, {
+        type: "image/jpeg",
+      });
+      const { publicUrl } = await uploadAccountMedia(FLOW_MEDIA_BUCKET, thumbFile);
+      return publicUrl;
+    } catch (err) {
+      console.warn("[send_media] thumbnail generation failed:", err);
+      return undefined;
+    }
+  }
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -920,16 +965,23 @@ function SendMediaForm({
       }
       setUploading(true);
       try {
-        // Account-scoped upload (path `account-<id>/...`) — see
-        // uploadAccountMedia + migration 020's flow-media RLS policy.
         const { publicUrl } = await uploadAccountMedia(FLOW_MEDIA_BUCKET, file);
-        // Patch all fields in one call so the form doesn't re-render
-        // with a half-uploaded state.
+
+        // For PDF documents, render the first page and upload as thumbnail.
+        let thumbnailUrl: string | undefined;
+        if (file.type === "application/pdf") {
+          const arrayBuffer = await file.arrayBuffer();
+          thumbnailUrl = await generatePdfThumbnail(arrayBuffer);
+        }
+
         onUpdateConfig({
           media_url: publicUrl,
           filename: file.name,
+          ...(thumbnailUrl ? { thumbnail_url: thumbnailUrl } : {}),
         });
-        toast.success("File uploaded.");
+        toast.success(
+          thumbnailUrl ? "File uploaded with thumbnail preview." : "File uploaded.",
+        );
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Upload failed.";
         toast.error(msg);
@@ -937,11 +989,39 @@ function SendMediaForm({
         setUploading(false);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [onUpdateConfig],
   );
 
+  // ── URL mode: save URL then optionally generate thumbnail ─────────────────
+  const handleUrlSave = useCallback(async () => {
+    const url = urlDraft.trim();
+    if (!url) return;
+    onUpdateConfig({ media_url: url, filename: url.split("/").pop() ?? "" });
+
+    // Auto-generate thumbnail for PDF URLs
+    if (isDocument && url.toLowerCase().endsWith(".pdf")) {
+      setThumbnailLoading(true);
+      try {
+        const thumbUrl = await generatePdfThumbnail(url);
+        if (thumbUrl) {
+          onUpdateConfig({ thumbnail_url: thumbUrl });
+          toast.success("Thumbnail generated from first slide.");
+        } else {
+          toast.success("URL saved. (No thumbnail — file may not be publicly accessible.)");
+        }
+      } finally {
+        setThumbnailLoading(false);
+      }
+    } else {
+      toast.success("URL saved.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlDraft, isDocument, onUpdateConfig]);
+
   const handleClear = () => {
-    onUpdateConfig({ media_url: "", filename: "" });
+    onUpdateConfig({ media_url: "", filename: "", thumbnail_url: "" });
+    setUrlDraft("");
   };
 
   return (
@@ -975,7 +1055,37 @@ function SendMediaForm({
       </div>
 
       <div>
-        <label className="mb-1 block text-xs text-muted-foreground">File</label>
+        {/* ── Source mode toggle ────────────────────────────────── */}
+        <div className="mb-2 flex items-center gap-1 text-[11px] text-muted-foreground">
+          <button
+            type="button"
+            onClick={() => { setInputMode("upload"); }}
+            className={cn(
+              "rounded px-2 py-0.5 transition-colors",
+              inputMode === "upload"
+                ? "bg-primary text-primary-foreground"
+                : "hover:bg-muted",
+            )}
+          >
+            <Upload className="mr-1 inline h-3 w-3" />
+            Upload file
+          </button>
+          <button
+            type="button"
+            onClick={() => { setInputMode("url"); }}
+            className={cn(
+              "rounded px-2 py-0.5 transition-colors",
+              inputMode === "url"
+                ? "bg-primary text-primary-foreground"
+                : "hover:bg-muted",
+            )}
+          >
+            <Link className="mr-1 inline h-3 w-3" />
+            Paste URL
+          </button>
+        </div>
+
+        {/* ── Already have a URL set — show linked chip with clear ────── */}
         {cfg.media_url ? (
           <div className="flex items-center gap-2 rounded-md border border-border bg-muted px-3 py-2 text-xs">
             <Paperclip className="h-3.5 w-3.5 shrink-0 text-cyan-400" />
@@ -998,7 +1108,33 @@ function SendMediaForm({
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
+        ) : inputMode === "url" ? (
+          /* ── URL input mode ────────────────────────────────────────── */
+          <div className="flex gap-2">
+            <Input
+              value={urlDraft}
+              onChange={(e) => setUrlDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void handleUrlSave(); }}
+              placeholder="https://example.com/portfolio.pdf"
+              className="flex-1 bg-muted text-xs"
+              disabled={thumbnailLoading}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!urlDraft.trim() || thumbnailLoading}
+              onClick={() => void handleUrlSave()}
+              className="shrink-0"
+            >
+              {thumbnailLoading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                "Save"
+              )}
+            </Button>
+          </div>
         ) : (
+          /* ── Upload mode ───────────────────────────────────────────── */
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
@@ -1026,7 +1162,6 @@ function SendMediaForm({
           onChange={(e) => {
             const f = e.target.files?.[0];
             if (f) void handleFile(f);
-            // Reset so picking the same file twice still fires onChange.
             e.target.value = "";
           }}
         />
@@ -1038,6 +1173,40 @@ function SendMediaForm({
         onChange={(v) => onUpdateConfig({ caption: v })}
         rows={2}
       />
+
+      {isDocument && cfg.thumbnail_url && (
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            PDF thumbnail preview (auto-generated from page 1)
+          </label>
+          <div className="relative w-full overflow-hidden rounded-md border border-border bg-muted">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={cfg.thumbnail_url}
+              alt="PDF first page preview"
+              className="max-h-40 w-full object-contain"
+            />
+            <button
+              type="button"
+              onClick={() => onUpdateConfig({ thumbnail_url: "" })}
+              className="absolute right-1 top-1 rounded bg-black/60 p-0.5 text-white hover:bg-black/80"
+              aria-label="Remove thumbnail"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            This thumbnail will be shown to contacts when the document is sent on WhatsApp.
+          </p>
+        </div>
+      )}
+
+      {isDocument && !cfg.thumbnail_url && cfg.media_url && (
+        <div className="flex items-center gap-1.5 rounded-md border border-dashed border-border bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground">
+          <ImageIcon className="h-3.5 w-3.5 shrink-0" />
+          No thumbnail — re-upload the PDF to auto-generate one from page 1.
+        </div>
+      )}
 
       {isDocument && (
         <div>
