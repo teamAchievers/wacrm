@@ -191,6 +191,31 @@ export default function FlowsPage() {
     }
   }
 
+  async function handleToggleStatus(flow: FlowRow) {
+    const nextStatus = flow.status === "active" ? "draft" : "active";
+    try {
+      const res = await fetch(`/api/flows/${flow.id}/activate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? `Failed: ${res.status}`);
+      }
+      const json = (await res.json()) as { flow: FlowRow };
+      setFlows((prev) =>
+        prev.map((f) => (f.id === flow.id ? { ...f, ...json.flow } : f)),
+      );
+      toast.success(
+        nextStatus === "active" ? "Flow activated!" : "Flow paused.",
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Update failed";
+      toast.error(msg);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -237,6 +262,7 @@ export default function FlowsPage() {
               flow={flow}
               onEdit={() => router.push(`/flows/${flow.id}`)}
               onDelete={() => handleDelete(flow)}
+              onToggleStatus={() => handleToggleStatus(flow)}
             />
           ))}
         </div>
@@ -359,10 +385,12 @@ function FlowCard({
   flow,
   onEdit,
   onDelete,
+  onToggleStatus,
 }: {
   flow: FlowRow;
   onEdit: () => void;
   onDelete: () => void;
+  onToggleStatus: () => void;
 }) {
   const triggerSummary = describeTrigger(flow);
   const StatusIcon =
@@ -408,6 +436,30 @@ function FlowCard({
           <Pencil className="h-3.5 w-3.5" />
           Edit
         </Button>
+        {flow.status !== "archived" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onToggleStatus}
+            className={
+              flow.status === "active"
+                ? "text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
+                : "text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
+            }
+          >
+            {flow.status === "active" ? (
+              <>
+                <PauseCircle className="h-3.5 w-3.5" />
+                Pause
+              </>
+            ) : (
+              <>
+                <PlayCircle className="h-3.5 w-3.5" />
+                Activate
+              </>
+            )}
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="sm"
