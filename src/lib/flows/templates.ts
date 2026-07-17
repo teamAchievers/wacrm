@@ -717,14 +717,17 @@ const UNBOX_QUALIFIER: FlowTemplate = {
         ],
       } as SendButtonsNodeConfig,
     },
-    // Portfolio shortcut
+    // Portfolio — send agency deck (copied from Unbox Lead Qualifier)
     {
       node_key: "portfolio",
-      node_type: "send_message",
+      node_type: "send_media",
       config: {
-        text: "Here's a look at some of our recent work 🎨\n\n🔗 *Portfolio:* https://unboxstudio.in/portfolio\n\nFeel free to browse and reach out when you're ready to discuss your project!",
+        media_type: "document",
+        media_url: "https://example.com/agency-deck.pdf",
+        caption: "Here's our portfolio 🎨\n\n✔ 100+ Brands Served\n✔ Performance Marketing\n✔ Social Media\n✔ Branding\n✔ Websites\n\nFeel free to browse and reach out when you're ready to discuss your project!",
+        filename: "Unbox-Studio-Portfolio.pdf",
         next_node_key: "handoff_talk",
-      } as SendMessageNodeConfig,
+      } as SendMediaNodeConfig,
     },
     // Handoff — Book a Call
     {
