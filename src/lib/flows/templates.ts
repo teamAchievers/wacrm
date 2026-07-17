@@ -27,6 +27,7 @@ import type {
   SendButtonsNodeConfig,
   SendListNodeConfig,
   SendMessageNodeConfig,
+  SendMediaNodeConfig,
   StartNodeConfig,
 } from "./types";
 
@@ -35,6 +36,7 @@ export type FlowTemplateNodeType =
   | "send_message"
   | "send_buttons"
   | "send_list"
+  | "send_media"
   | "collect_input"
   | "condition"
   | "set_tag"
@@ -49,6 +51,7 @@ export interface FlowTemplateNode {
     | SendMessageNodeConfig
     | SendButtonsNodeConfig
     | SendListNodeConfig
+    | SendMediaNodeConfig
     | CollectInputNodeConfig
     | ConditionNodeConfig
     | HandoffNodeConfig
@@ -286,6 +289,254 @@ const LEAD_CAPTURE: FlowTemplate = {
 };
 
 // ============================================================
+// 4. Unbox Lead Qualifier — 12-node interactive questionnaire
+// ============================================================
+const UNBOX_LEAD_QUALIFIER: FlowTemplate = {
+  slug: "unbox_lead_qualifier",
+  name: "Unbox Lead Qualifier",
+  description:
+    "Qualify leads interactively for Unbox Studio. Collects service interest, industry, budget, and business details, branching to high-intent or lower-budget actions.",
+  icon: "UserPlus",
+  trigger_type: "first_inbound_message",
+  trigger_config: {},
+  entry_node_id: "start",
+  nodes: [
+    {
+      node_key: "start",
+      node_type: "start",
+      config: { next_node_key: "welcome" },
+    },
+    {
+      node_key: "welcome",
+      node_type: "send_message",
+      config: {
+        text: "👋 Hi! Welcome to Unbox Studio.\n\nWe help businesses grow through:\n\n• Performance Marketing\n• Social Media Management\n• Branding\n• Website Development\n• SEO\n\nLet's understand your business so our team can recommend the right strategy.\n\nIt'll only take about 2 minutes.",
+        next_node_key: "select_service",
+      } as SendMessageNodeConfig,
+    },
+    {
+      node_key: "select_service",
+      node_type: "send_list",
+      config: {
+        text: "What service are you interested in?",
+        button_label: "View Services",
+        sections: [
+          {
+            title: "Services",
+            rows: [
+              { reply_id: "smm", title: "📱 Social Media Management", next_node_key: "ask_industry" },
+              { reply_id: "perf", title: "🚀 Performance Marketing", next_node_key: "ask_industry" },
+              { reply_id: "web", title: "🌐 Website Development", next_node_key: "ask_industry" },
+              { reply_id: "branding", title: "🎨 Branding & Design", next_node_key: "ask_industry" },
+              { reply_id: "seo", title: "📈 SEO", next_node_key: "ask_industry" },
+              { reply_id: "not_sure", title: "🤔 Not Sure", next_node_key: "ask_industry" },
+            ],
+          },
+        ],
+      } as SendListNodeConfig,
+    },
+    {
+      node_key: "ask_industry",
+      node_type: "send_list",
+      config: {
+        text: "What industry are you in?",
+        button_label: "View Industries",
+        sections: [
+          {
+            title: "Industries",
+            rows: [
+              { reply_id: "travel", title: "Travel", next_node_key: "business_stage" },
+              { reply_id: "real_estate", title: "Real Estate", next_node_key: "business_stage" },
+              { reply_id: "healthcare", title: "Healthcare", next_node_key: "business_stage" },
+              { reply_id: "education", title: "Education", next_node_key: "business_stage" },
+              { reply_id: "ecommerce", title: "Ecommerce", next_node_key: "business_stage" },
+              { reply_id: "architecture", title: "Architecture", next_node_key: "business_stage" },
+              { reply_id: "construction", title: "Construction", next_node_key: "business_stage" },
+              { reply_id: "finance", title: "Finance", next_node_key: "business_stage" },
+              { reply_id: "personal_brand", title: "Personal Brand", next_node_key: "business_stage" },
+              { reply_id: "other", title: "Other", next_node_key: "business_stage" },
+            ],
+          },
+        ],
+      } as SendListNodeConfig,
+    },
+    {
+      node_key: "business_stage",
+      node_type: "send_buttons",
+      config: {
+        text: "What stage is your business in?",
+        buttons: [
+          { reply_id: "startup", title: "Startup", next_node_key: "marketing_budget" },
+          { reply_id: "growing", title: "Growing Business", next_node_key: "marketing_budget" },
+          { reply_id: "established", title: "Established Business", next_node_key: "marketing_budget" },
+        ],
+      } as SendButtonsNodeConfig,
+    },
+    {
+      node_key: "marketing_budget",
+      node_type: "send_list",
+      config: {
+        text: "What is your monthly marketing budget?",
+        button_label: "View Budgets",
+        sections: [
+          {
+            title: "Budgets",
+            rows: [
+              { reply_id: "below_30k", title: "Below ₹30,000", next_node_key: "ask_goal" },
+              { reply_id: "30k_50k", title: "₹30k–₹50k", next_node_key: "ask_goal" },
+              { reply_id: "50k_1l", title: "₹50k–₹1L", next_node_key: "set_high_budget_tag" },
+              { reply_id: "1l_3l", title: "₹1L–₹3L", next_node_key: "set_high_budget_tag" },
+              { reply_id: "3l_plus", title: "₹3L+", next_node_key: "set_high_budget_tag" },
+            ],
+          },
+        ],
+      } as SendListNodeConfig,
+    },
+    {
+      node_key: "set_high_budget_tag",
+      node_type: "set_tag",
+      config: {
+        mode: "add",
+        tag_id: "", // Configured in builder by user
+        next_node_key: "ask_goal",
+      },
+    },
+    {
+      node_key: "ask_goal",
+      node_type: "send_list",
+      config: {
+        text: "What is your primary marketing goal?",
+        button_label: "View Goals",
+        sections: [
+          {
+            title: "Goals",
+            rows: [
+              { reply_id: "leads", title: "Generate Leads", next_node_key: "ask_business_name" },
+              { reply_id: "sales", title: "Increase Sales", next_node_key: "ask_business_name" },
+              { reply_id: "awareness", title: "Brand Awareness", next_node_key: "ask_business_name" },
+              { reply_id: "website", title: "Website", next_node_key: "ask_business_name" },
+              { reply_id: "social", title: "Social Media Growth", next_node_key: "ask_business_name" },
+              { reply_id: "consultation", title: "Need Consultation", next_node_key: "ask_business_name" },
+            ],
+          },
+        ],
+      } as SendListNodeConfig,
+    },
+    {
+      node_key: "ask_business_name",
+      node_type: "collect_input",
+      config: {
+        prompt_text: "What's your business name?",
+        var_key: "company",
+        next_node_key: "ask_website",
+      } as CollectInputNodeConfig,
+    },
+    {
+      node_key: "ask_website",
+      node_type: "collect_input",
+      config: {
+        prompt_text: "Share your Website or Instagram profile.",
+        var_key: "website",
+        next_node_key: "ask_name",
+      } as CollectInputNodeConfig,
+    },
+    {
+      node_key: "ask_name",
+      node_type: "collect_input",
+      config: {
+        prompt_text: "What's your name?",
+        var_key: "name",
+        next_node_key: "ask_email",
+      } as CollectInputNodeConfig,
+    },
+    {
+      node_key: "ask_email",
+      node_type: "collect_input",
+      config: {
+        prompt_text: "What's your email?",
+        var_key: "email",
+        next_node_key: "ask_phone",
+      } as CollectInputNodeConfig,
+    },
+    {
+      node_key: "ask_phone",
+      node_type: "send_buttons",
+      config: {
+        text: "Is this WhatsApp number your primary business contact?",
+        buttons: [
+          { reply_id: "yes", title: "Yes", next_node_key: "qualification_logic" },
+          { reply_id: "no", title: "Use Another Number", next_node_key: "collect_new_phone" },
+        ],
+      } as SendButtonsNodeConfig,
+    },
+    {
+      node_key: "collect_new_phone",
+      node_type: "collect_input",
+      config: {
+        prompt_text: "Please enter your primary business contact number:",
+        var_key: "phone",
+        next_node_key: "qualification_logic",
+      } as CollectInputNodeConfig,
+    },
+    {
+      node_key: "qualification_logic",
+      node_type: "condition",
+      config: {
+        subject: "tag",
+        subject_key: "", // Tag to evaluate configured by user
+        operator: "present",
+        true_next: "high_intent_flow",
+        false_next: "lower_budget_flow",
+      } as ConditionNodeConfig,
+    },
+    {
+      node_key: "high_intent_flow",
+      node_type: "send_buttons",
+      config: {
+        text: "🔥 Great!\n\nBased on your responses, our strategist can help you create a customized growth plan.\n\nWould you like to schedule a FREE 30-minute strategy session?",
+        buttons: [
+          { reply_id: "book", title: "Book Call", next_node_key: "handoff_high" },
+          { reply_id: "team", title: "Talk to Team", next_node_key: "handoff_high" },
+        ],
+      } as SendButtonsNodeConfig,
+    },
+    {
+      node_key: "lower_budget_flow",
+      node_type: "send_message",
+      config: {
+        text: "Thanks!\n\nWe've prepared some resources that will help you grow.\n\nMeanwhile our team will also review your business.",
+        next_node_key: "portfolio_node",
+      } as SendMessageNodeConfig,
+    },
+    {
+      node_key: "portfolio_node",
+      node_type: "send_media",
+      config: {
+        media_type: "document",
+        media_url: "https://example.com/agency-deck.pdf",
+        caption: "Meanwhile, here's our portfolio.\n\n✔ 100+ Brands Served\n✔ Performance Marketing\n✔ Social Media\n✔ Branding\n✔ Websites\n\nWe'll review your business shortly.",
+        filename: "Portfolio.pdf",
+        next_node_key: "handoff_normal",
+      } as SendMediaNodeConfig,
+    },
+    {
+      node_key: "handoff_high",
+      node_type: "handoff",
+      config: {
+        note: "New Qualified Lead\nName: {{vars.name}}\nCompany: {{vars.company}}\nWebsite: {{vars.website}}\nEmail: {{vars.email}}\nPhone: {{vars.phone}}",
+      } as HandoffNodeConfig,
+    },
+    {
+      node_key: "handoff_normal",
+      node_type: "handoff",
+      config: {
+        note: "New Lead (Normal)\nName: {{vars.name}}\nCompany: {{vars.company}}\nWebsite: {{vars.website}}\nEmail: {{vars.email}}\nPhone: {{vars.phone}}",
+      } as HandoffNodeConfig,
+    },
+  ],
+};
+
+// ============================================================
 // Registry
 // ============================================================
 
@@ -293,6 +544,7 @@ const TEMPLATES: Record<string, FlowTemplate> = {
   welcome_menu: WELCOME_MENU,
   faq_bot: FAQ_BOT,
   lead_capture: LEAD_CAPTURE,
+  unbox_lead_qualifier: UNBOX_LEAD_QUALIFIER,
 };
 
 export function getFlowTemplate(slug: string): FlowTemplate | null {
