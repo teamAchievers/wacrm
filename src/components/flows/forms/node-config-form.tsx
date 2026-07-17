@@ -200,16 +200,16 @@ export function NodeConfigForm({
           />
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">
-              Notify via WhatsApp (Admin Phone Number)
+              Notify via WhatsApp (Admin Phone Number(s))
             </label>
             <Input
               value={(cfg as { notify_phone?: string }).notify_phone ?? ""}
               onChange={(e) => onUpdateConfig({ notify_phone: e.target.value })}
-              placeholder="e.g. +919876543210"
+              placeholder="e.g. +919876543210, +918765432109"
               className="bg-muted"
             />
             <p className="mt-1 text-[10px] text-muted-foreground">
-              Optional. Sends a WhatsApp message containing the note to this number when the lead qualifies.
+              Optional. Comma-separated. Sends a WhatsApp message containing the note to these numbers when the lead qualifies.
             </p>
           </div>
         </div>

@@ -463,8 +463,8 @@ async function executeHandoff(
   // Send WhatsApp notification to the configured admin phone number if present
   if (cfg.notify_phone) {
     try {
-      const sanitizedPhone = sanitizePhoneForMeta(cfg.notify_phone);
-      if (isValidE164(sanitizedPhone)) {
+      const phones = cfg.notify_phone.split(",").map((p) => p.trim()).filter(Boolean);
+      if (phones.length > 0) {
         const { data: config } = await db
           .from("whatsapp_config")
           .select("*")
@@ -477,19 +477,24 @@ async function executeHandoff(
           const interpolatedNote = interpolateVars(rawNote, run.vars);
           const text = `🔔 *Lead Notification*\n\n${interpolatedNote}`;
 
-          const variants = phoneVariants(sanitizedPhone);
-          for (const v of variants) {
-            try {
-              await sendTextMessage({
-                phoneNumberId: config.phone_number_id,
-                accessToken,
-                to: v,
-                text,
-              });
-              break;
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : String(err);
-              if (!isRecipientNotAllowedError(msg)) throw err;
+          for (const rawPhone of phones) {
+            const sanitizedPhone = sanitizePhoneForMeta(rawPhone);
+            if (!isValidE164(sanitizedPhone)) continue;
+
+            const variants = phoneVariants(sanitizedPhone);
+            for (const v of variants) {
+              try {
+                await sendTextMessage({
+                  phoneNumberId: config.phone_number_id,
+                  accessToken,
+                  to: v,
+                  text,
+                });
+                break;
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                if (!isRecipientNotAllowedError(msg)) throw err;
+              }
             }
           }
         }
