@@ -324,8 +324,8 @@ const UNBOX_LEAD_QUALIFIER: FlowTemplate = {
           {
             title: "Services",
             rows: [
-              { reply_id: "smm", title: "📱 Social Media Management", next_node_key: "ask_industry" },
-              { reply_id: "perf", title: "🚀 Performance Marketing", next_node_key: "ask_industry" },
+              { reply_id: "smm", title: "📱 Social Media", next_node_key: "ask_industry" },
+              { reply_id: "perf", title: "🚀 Performance Mktg", next_node_key: "ask_industry" },
               { reply_id: "web", title: "🌐 Website Development", next_node_key: "ask_industry" },
               { reply_id: "branding", title: "🎨 Branding & Design", next_node_key: "ask_industry" },
               { reply_id: "seo", title: "📈 SEO", next_node_key: "ask_industry" },
