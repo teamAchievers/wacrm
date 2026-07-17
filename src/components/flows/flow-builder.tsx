@@ -569,6 +569,9 @@ function NodeConfigWithAdvanced({
 // ============================================================
 
 function AddNodeButton({ onAdd }: { onAdd: (type: NodeType) => void }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
   const types: NodeType[] = [
     "start",
     "send_buttons",
@@ -581,27 +584,52 @@ function AddNodeButton({ onAdd }: { onAdd: (type: NodeType) => void }) {
     "handoff",
     "end",
   ];
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
+    <div className="relative inline-block text-left" ref={containerRef}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
         className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
         aria-label="Add node"
       >
         <Plus className="h-3.5 w-3.5" />
         Add node
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="border-border bg-popover">
-        {types.map((t) => {
-          const meta = NODE_META[t];
-          return (
-            <DropdownMenuItem key={t} onClick={() => onAdd(t)}>
-              <meta.icon className={cn("h-3.5 w-3.5", meta.color)} />
-              {meta.label}
-            </DropdownMenuItem>
-          );
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 mt-1 z-50 min-w-40 rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 focus:outline-none border border-border">
+          {types.map((t) => {
+            const meta = NODE_META[t];
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => {
+                  onAdd(t);
+                  setOpen(false);
+                }}
+                className="w-full text-left flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                <meta.icon className={cn("h-3.5 w-3.5", meta.color)} />
+                {meta.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
