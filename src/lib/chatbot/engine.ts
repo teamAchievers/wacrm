@@ -103,9 +103,40 @@ export async function handleChatbotReply(
     return
   }
 
-  // 6. Process AI response for handoff triggers
+  // 6. Process AI response for tags and handoff triggers
+  const tagRegex = /\[TAG:\s*(Cold|Warm|Hot|Qualified)\]/i
+  const tagMatch = replyText.match(tagRegex)
+  if (tagMatch) {
+    const matchedTagName = tagMatch[1]
+    const normalizedTagName = ['Cold', 'Warm', 'Hot', 'Qualified'].find(
+      (t) => t.toLowerCase() === matchedTagName.toLowerCase()
+    )
+    if (normalizedTagName) {
+      syncLeadTag(accountId, contactId, ownerId, normalizedTagName).catch((err) =>
+        console.error('[chatbot] failed to sync lead tag:', err)
+      )
+    }
+    replyText = replyText.replace(tagRegex, '').trim()
+  }
+
   if (replyText.includes('[HANDOFF]') || replyText.trim() === 'HANDOFF') {
-    await triggerHandoff(accountId, conversationId, contactId, ownerId)
+    replyText = replyText.replace('[HANDOFF]', '').trim()
+    // If LLM stripped the message but triggered handoff, send fallback notice
+    if (!replyText) {
+      replyText = 'Transferring you to a human agent. Please wait...'
+    }
+    try {
+      await engineSendText({
+        accountId,
+        userId: ownerId,
+        conversationId,
+        contactId,
+        text: replyText,
+      })
+    } catch (err) {
+      console.error('[chatbot] failed to send handoff reply:', err)
+    }
+    await triggerHandoff(accountId, conversationId, contactId, ownerId, false)
     return
   }
 
@@ -127,7 +158,8 @@ async function triggerHandoff(
   accountId: string,
   conversationId: string,
   contactId: string,
-  ownerId: string
+  ownerId: string,
+  sendNotice: boolean = true
 ): Promise<void> {
   const db = supabaseAdmin()
 
@@ -137,18 +169,100 @@ async function triggerHandoff(
     .update({ assigned_agent_id: ownerId, chatbot_enabled: false })
     .eq('id', conversationId)
 
-  // Send human handoff notice
-  try {
-    await engineSendText({
-      accountId,
-      userId: ownerId,
-      conversationId,
-      contactId,
-      text: 'Transferring you to a human agent. Please wait...',
-    })
-  } catch (err) {
-    console.error('[chatbot] failed to send handoff notice:', err)
+  // Send human handoff notice if requested
+  if (sendNotice) {
+    try {
+      await engineSendText({
+        accountId,
+        userId: ownerId,
+        conversationId,
+        contactId,
+        text: 'Transferring you to a human agent. Please wait...',
+      })
+    } catch (err) {
+      console.error('[chatbot] failed to send handoff notice:', err)
+    }
   }
+}
+
+async function syncLeadTag(
+  accountId: string,
+  contactId: string,
+  ownerId: string,
+  tagName: string
+): Promise<void> {
+  const db = supabaseAdmin()
+  const tempTags = ['Cold', 'Warm', 'Hot', 'Qualified']
+  if (!tempTags.includes(tagName)) return
+
+  const tagColors: Record<string, string> = {
+    Qualified: '#22c55e',
+    Hot: '#ef4444',
+    Warm: '#f59e0b',
+    Cold: '#3b82f6',
+  }
+
+  // 1. Find or create the tag
+  let { data: tag, error: tagFetchErr } = await db
+    .from('tags')
+    .select('id')
+    .eq('account_id', accountId)
+    .eq('name', tagName)
+    .maybeSingle()
+
+  if (tagFetchErr) {
+    console.error('[chatbot] failed to fetch tag:', tagFetchErr)
+    return
+  }
+
+  if (!tag) {
+    const { data: newTag, error: tagCreateErr } = await db
+      .from('tags')
+      .insert({
+        name: tagName,
+        color: tagColors[tagName],
+        account_id: accountId,
+        user_id: ownerId,
+      })
+      .select('id')
+      .single()
+
+    if (tagCreateErr || !newTag) {
+      console.error('[chatbot] failed to create tag:', tagCreateErr)
+      return
+    }
+    tag = newTag
+  }
+
+  // 2. Fetch existing temp tags for account to clean them up
+  const { data: existingTags, error: listTagsErr } = await db
+    .from('tags')
+    .select('id')
+    .eq('account_id', accountId)
+    .in('name', tempTags)
+
+  if (listTagsErr || !existingTags) {
+    console.error('[chatbot] failed to list temperature tags:', listTagsErr)
+    return
+  }
+
+  const tagIdsToRemove = existingTags.map((t) => t.id)
+
+  if (tagIdsToRemove.length > 0) {
+    await db
+      .from('contact_tags')
+      .delete()
+      .eq('contact_id', contactId)
+      .in('tag_id', tagIdsToRemove)
+  }
+
+  // 3. Upsert contact tag
+  await db
+    .from('contact_tags')
+    .upsert(
+      { contact_id: contactId, tag_id: tag.id },
+      { onConflict: 'contact_id,tag_id', ignoreDuplicates: true }
+    )
 }
 
 interface MessageHistory {
@@ -163,8 +277,13 @@ async function callGemini(
 ): Promise<string> {
   const decorator = `\n\n[System Instructions]\n` +
     `1. Act as a humanized, conversational, and warm presales lead qualifier. Analyze the chat history context, and reply in a friendly, natural, and empathetic human tone. Keep responses brief.\n` +
-    `2. Interactively qualify the lead by asking questions one at a time (e.g., understanding their problem, budget, or timeline).\n` +
-    `3. If they ask for a human, or if you have finished qualifying their needs, explain that you are transferring them and append "[HANDOFF]" to the end of your response.`;
+    `2. Interactively qualify the lead by checking their temperature. Go through the qualification questions (Goal/Need, Timeline, and Budget/Scale) one by one.\n` +
+    `3. Score the lead:\n` +
+    `   - If they provide positive and clear answers to all qualification questions: output [TAG: Qualified]\n` +
+    `   - If they are highly interested but timeline/budget is pending: output [TAG: Hot]\n` +
+    `   - If they have general, mild interest but are slow to commit: output [TAG: Warm]\n` +
+    `   - If they show resistance, spam, or no interest: output [TAG: Cold]\n` +
+    `4. If they ask for a human, or if you have finished qualifying their needs, explain that you are transferring them and append "[HANDOFF]" to the end of your response.`;
 
   const instruction = `${systemPrompt}${decorator}`;
 
@@ -209,8 +328,13 @@ async function callOpenAI(
 ): Promise<string> {
   const decorator = `\n\n[System Instructions]\n` +
     `1. Act as a humanized, conversational, and warm presales lead qualifier. Analyze the chat history context, and reply in a friendly, natural, and empathetic human tone. Keep responses brief.\n` +
-    `2. Interactively qualify the lead by asking questions one at a time (e.g., understanding their problem, budget, or timeline).\n` +
-    `3. If they ask for a human, or if you have finished qualifying their needs, explain that you are transferring them and append "[HANDOFF]" to the end of your response.`;
+    `2. Interactively qualify the lead by checking their temperature. Go through the qualification questions (Goal/Need, Timeline, and Budget/Scale) one by one.\n` +
+    `3. Score the lead:\n` +
+    `   - If they provide positive and clear answers to all qualification questions: output [TAG: Qualified]\n` +
+    `   - If they are highly interested but timeline/budget is pending: output [TAG: Hot]\n` +
+    `   - If they have general, mild interest but are slow to commit: output [TAG: Warm]\n` +
+    `   - If they show resistance, spam, or no interest: output [TAG: Cold]\n` +
+    `4. If they ask for a human, or if you have finished qualifying their needs, explain that you are transferring them and append "[HANDOFF]" to the end of your response.`;
 
   const messages = [
     {

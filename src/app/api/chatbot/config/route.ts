@@ -40,7 +40,7 @@ export async function GET() {
       return NextResponse.json({
         is_enabled: false,
         provider: 'gemini',
-        system_prompt: 'You are a helpful business assistant. Ask the customer about their goals and business scale to qualify them as a lead before transferring to our sales team.',
+        system_prompt: 'You are a friendly presales assistant. Interactively ask the customer about their goals, timeline, and scale to qualify them as a lead before transferring to a human specialist.',
         handoff_keywords: 'human, agent, representative, help, support, talk to a person',
         has_key: false,
       })
