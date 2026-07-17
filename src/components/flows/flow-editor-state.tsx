@@ -184,7 +184,11 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
       return { mode: "add", tag_id: "", next_node_key: "" };
     case "handoff":
       return { note: "" };
+    case "trigger_flow":
+      return { flow_slug: "" };
     case "end":
+      return {};
+    default:
       return {};
   }
 }

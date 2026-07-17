@@ -173,6 +173,11 @@ export interface SetTagNodeConfig {
   next_node_key: string;
 }
 
+export interface TriggerFlowNodeConfig {
+  /** The slug or ID of the flow to trigger. */
+  flow_slug: string;
+}
+
 // Terminal nodes carry no config — they just stop the run.
 export type EndNodeConfig = Record<string, never>;
 
@@ -194,6 +199,7 @@ export type FlowNodeConfig =
   | { node_type: "condition"; config: ConditionNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }
   | { node_type: "handoff"; config: HandoffNodeConfig }
+  | { node_type: "trigger_flow"; config: TriggerFlowNodeConfig }
   | { node_type: "end"; config: EndNodeConfig };
 
 export type FlowNodeType = FlowNodeConfig["node_type"];
@@ -319,6 +325,8 @@ export type ParsedInbound =
       text: string;
       /** Meta's `messages[0].id` — used for idempotency. */
       meta_message_id: string;
+      /** True if incoming message carries Meta Ad referral metadata */
+      is_meta_referral?: boolean;
     }
   | {
       kind: "interactive_reply";
@@ -327,6 +335,8 @@ export type ParsedInbound =
       /** The visible title of the tapped option (for logging). */
       reply_title: string;
       meta_message_id: string;
+      /** True if incoming message carries Meta Ad referral metadata */
+      is_meta_referral?: boolean;
     };
 
 export interface DispatchInboundInput {

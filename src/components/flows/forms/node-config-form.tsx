@@ -217,6 +217,24 @@ export function NodeConfigForm({
         </div>
       );
 
+    case "trigger_flow":
+      return (
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            Target Flow Slug or ID to Trigger
+          </label>
+          <Input
+            value={(cfg as { flow_slug?: string }).flow_slug ?? ""}
+            onChange={(e) => onUpdateConfig({ flow_slug: e.target.value })}
+            placeholder="e.g. unbox_qualifier"
+            className="bg-muted text-xs"
+          />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            Starts execution of the selected flow for the contact. Example slugs: <code className="rounded bg-muted px-1">unbox_qualifier</code>, <code className="rounded bg-muted px-1">unbox_organic_qualifier</code>.
+          </p>
+        </div>
+      );
+
     case "end":
       return (
         <p className="text-xs text-muted-foreground">
@@ -224,6 +242,8 @@ export function NodeConfigForm({
           complete. No config needed.
         </p>
       );
+    default:
+      return null;
   }
 }
 

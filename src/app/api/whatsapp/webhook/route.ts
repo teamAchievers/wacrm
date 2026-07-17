@@ -59,6 +59,14 @@ interface WhatsAppMessage {
   }
   /** Present when the customer swipe-replies to one of our messages. */
   context?: { id: string }
+  /** Present when the message is a Meta Ad click-to-WhatsApp referral */
+  referral?: {
+    source_id?: string
+    source_type?: string
+    source_url?: string
+    headline?: string
+    body?: string
+  }
 }
 
 interface WhatsAppWebhookEntry {
@@ -680,6 +688,8 @@ async function processMessage(
   // no active flows take the runner's early-exit "no_match" path
   // basically for free (one indexed SELECT for the active run).
   // ============================================================
+  const isMetaReferral = !!message.referral;
+
   const flowResult = await dispatchInboundToFlows({
     accountId,
     userId: configOwnerUserId,
@@ -692,11 +702,13 @@ async function processMessage(
             reply_id: interactiveReplyId,
             reply_title: contentText ?? '',
             meta_message_id: message.id,
+            is_meta_referral: isMetaReferral,
           }
         : {
             kind: 'text',
             text: contentText ?? message.text?.body ?? '',
             meta_message_id: message.id,
+            is_meta_referral: isMetaReferral,
           },
     isFirstInboundMessage,
   })

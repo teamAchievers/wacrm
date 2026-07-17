@@ -50,6 +50,7 @@ export type NodeType =
   | 'condition'
   | 'set_tag'
   | 'handoff'
+  | 'trigger_flow'
   | 'end';
 
 export interface BuilderNode {
@@ -159,6 +160,13 @@ export const NODE_META: Record<
     blurb: 'Hands the conversation to a human',
     category: 'flow',
   },
+  trigger_flow: {
+    label: 'Trigger flow',
+    icon: Workflow,
+    color: 'text-violet-400',
+    blurb: 'Starts another flow for the contact',
+    category: 'flow',
+  },
   end: {
     label: 'End',
     icon: Flag,
@@ -206,6 +214,7 @@ const NODE_HUE: Record<NodeType, { l: number; c: number; h: number }> = {
   condition: { l: 0.72, c: 0.15, h: 65 }, // amber — a fork in the road
   set_tag: { l: 0.65, c: 0.15, h: 350 }, // pink
   handoff: { l: 0.65, c: 0.17, h: 16 }, // rose — hands off
+  trigger_flow: { l: 0.63, c: 0.17, h: 280 }, // violet/purple — trigger another flow
   end: { l: 0.55, c: 0.01, h: 260 }, // neutral grey — terminal
 };
 
@@ -419,5 +428,11 @@ export function summarizeNode(node: BuilderNode): string | null {
       const note = typeof cfg.note === 'string' ? cfg.note : '';
       return note.length > 0 ? truncate(note) : null;
     }
+    case 'trigger_flow': {
+      const slug = typeof cfg.flow_slug === 'string' ? cfg.flow_slug : '';
+      return slug ? `Trigger: ${slug}` : 'Trigger flow';
+    }
+    default:
+      return null;
   }
 }

@@ -139,7 +139,7 @@ export function isSuspending(node_type: string): boolean {
 
 /** Nodes that end the run. */
 export function isTerminal(node_type: string): boolean {
-  return node_type === "handoff" || node_type === "end";
+  return node_type === "handoff" || node_type === "trigger_flow" || node_type === "end";
 }
 
 /**
@@ -820,6 +820,10 @@ async function advanceFromNodeKey(
       await executeHandoff(db, run, node);
       return { outcome: "handed_off" };
     }
+    if (node.node_type === "trigger_flow") {
+      const outcome = await executeTriggerFlow(db, run, node);
+      return { outcome: outcome === "started" ? "advanced" : "completed" };
+    }
     if (node.node_type === "end") {
       await logEvent(db, run.id, "completed", node.node_key);
       await endRun(db, run.id, "completed", "end_node");
@@ -1101,6 +1105,80 @@ async function handleReplyForActiveRun(
   return { consumed: true, flow_run_id: run.id, outcome: "completed" };
 }
 
+async function executeTriggerFlow(
+  db: AdminClient,
+  run: FlowRunRow,
+  node: FlowNodeRow,
+): Promise<"started" | "failed"> {
+  const cfg = node.config as { flow_slug: string };
+  if (!cfg.flow_slug) {
+    await logEvent(db, run.id, "error", node.node_key, {
+      reason: "trigger_flow_missing_slug",
+    });
+    await endRun(db, run.id, "failed", "trigger_flow_missing_slug");
+    return "failed";
+  }
+
+  // Load the flow to trigger. Can match either by its slug (name slugified) or ID.
+  const { data: flows, error } = await db
+    .from("flows")
+    .select("*")
+    .eq("account_id", run.account_id)
+    .eq("status", "active");
+
+  if (error || !flows) {
+    await logEvent(db, run.id, "error", node.node_key, {
+      reason: "trigger_flow_lookup_failed",
+      detail: error?.message,
+    });
+    await endRun(db, run.id, "failed", "trigger_flow_lookup_failed");
+    return "failed";
+  }
+
+  // Find flow matching by ID or name matching the slug
+  const targetFlow = (flows as FlowRow[]).find(
+    (f) =>
+      f.id === cfg.flow_slug ||
+      f.name.toLowerCase().replace(/[^a-z0-9]+/g, "_") === cfg.flow_slug ||
+      f.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") === cfg.flow_slug
+  );
+
+  if (!targetFlow) {
+    await logEvent(db, run.id, "error", node.node_key, {
+      reason: `trigger_flow_not_found:${cfg.flow_slug}`,
+    });
+    await endRun(db, run.id, "failed", "trigger_flow_target_not_found");
+    return "failed";
+  }
+
+  // 1. Mark current run as completed to clear the idx_one_active_run_per_contact constraint
+  await endRun(db, run.id, "completed", `triggered_flow:${targetFlow.name}`);
+
+  // 2. Load all nodes for target flow
+  const nodes = await loadAllNodes(db, targetFlow.id);
+
+  // 3. Start a new run for the target flow, propagating vars (including is_meta_referral)
+  const res = await startNewRun(
+    db,
+    targetFlow,
+    {
+      accountId: run.account_id,
+      userId: run.user_id,
+      contactId: run.contact_id!,
+      conversationId: run.conversation_id!,
+      message: {
+        kind: "text",
+        meta_message_id: `trigger-flow-${run.id}-${Date.now()}`,
+        text: `Triggered flow: ${targetFlow.name}`,
+        is_meta_referral: !!run.vars.is_meta_referral,
+      },
+    },
+    nodes,
+  );
+
+  return res.outcome === "started" ? "started" : "failed";
+}
+
 async function startNewRun(
   db: AdminClient,
   flow: FlowRow,
@@ -1126,6 +1204,11 @@ async function startNewRun(
       conversation_id: input.conversationId,
       status: "active",
       current_node_key: flow.entry_node_id,
+      // Set initial variables — include the meta_ad indicator so
+      // condition nodes inside the flow can route accordingly.
+      vars: {
+        is_meta_referral: !!input.message.is_meta_referral,
+      },
     })
     .select("*")
     .maybeSingle();

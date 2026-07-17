@@ -29,6 +29,7 @@ import type {
   SendMessageNodeConfig,
   SendMediaNodeConfig,
   StartNodeConfig,
+  TriggerFlowNodeConfig,
 } from "./types";
 
 export type FlowTemplateNodeType =
@@ -41,6 +42,7 @@ export type FlowTemplateNodeType =
   | "condition"
   | "set_tag"
   | "handoff"
+  | "trigger_flow"
   | "end";
 
 export interface FlowTemplateNode {
@@ -55,6 +57,7 @@ export interface FlowTemplateNode {
     | CollectInputNodeConfig
     | ConditionNodeConfig
     | HandoffNodeConfig
+    | TriggerFlowNodeConfig
     | Record<string, unknown>;
 }
 
@@ -1021,6 +1024,56 @@ const UNBOX_ORGANIC_QUALIFIER: FlowTemplate = {
   ],
 };
 
+// ============================================================
+// 7. Unbox Lead Router — Routing Meta Ad vs Organic leads
+// ============================================================
+const UNBOX_LEAD_ROUTER: FlowTemplate = {
+  slug: "unbox_lead_router",
+  name: "Unbox Lead Router",
+  description:
+    "An entry router that evaluates if a lead came from a Meta Ad (Instant Form). Branches to 'Unbox Qualifier' or 'Unbox Organic Qualifier' accordingly.",
+  icon: "UserPlus",
+  trigger_type: "first_inbound_message",
+  trigger_config: {},
+  entry_node_id: "start",
+  nodes: [
+    {
+      node_key: "start",
+      node_type: "start",
+      config: { next_node_key: "check_meta" },
+    },
+    // Condition — Check if came from Meta Ad
+    {
+      node_key: "check_meta",
+      node_type: "condition",
+      config: {
+        subject: "var",
+        subject_key: "is_meta_referral",
+        operator: "equals",
+        value: "true",
+        true_next: "trigger_ad_flow",
+        false_next: "trigger_organic_flow",
+      } as ConditionNodeConfig,
+    },
+    // Trigger Unbox Qualifier (Ad flow)
+    {
+      node_key: "trigger_ad_flow",
+      node_type: "trigger_flow",
+      config: {
+        flow_slug: "unbox_qualifier",
+      } as TriggerFlowNodeConfig,
+    },
+    // Trigger Unbox Organic Qualifier (Organic flow)
+    {
+      node_key: "trigger_organic_flow",
+      node_type: "trigger_flow",
+      config: {
+        flow_slug: "unbox_organic_qualifier",
+      } as TriggerFlowNodeConfig,
+    },
+  ],
+};
+
 const TEMPLATES: Record<string, FlowTemplate> = {
   welcome_menu: WELCOME_MENU,
   faq_bot: FAQ_BOT,
@@ -1028,6 +1081,7 @@ const TEMPLATES: Record<string, FlowTemplate> = {
   unbox_lead_qualifier: UNBOX_LEAD_QUALIFIER,
   unbox_qualifier: UNBOX_QUALIFIER,
   unbox_organic_qualifier: UNBOX_ORGANIC_QUALIFIER,
+  unbox_lead_router: UNBOX_LEAD_ROUTER,
 };
 
 export function getFlowTemplate(slug: string): FlowTemplate | null {
