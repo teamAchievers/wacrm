@@ -701,6 +701,20 @@ function validateNode(
       break;
     }
 
+    case "trigger_flow": {
+      const cfg = node.config as { flow_slug?: string };
+      if (!cfg.flow_slug?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "flow_slug",
+          message: "Trigger-flow node needs a target flow slug or ID to trigger.",
+        });
+      }
+      break;
+    }
+
     case "handoff":
     case "end":
       // Terminal nodes have no outgoing edges; nothing to validate
@@ -786,6 +800,7 @@ function outgoingEdges(node: NodeInput): string[] {
       return out;
     }
     case "handoff":
+    case "trigger_flow":
     case "end":
     default:
       return [];
