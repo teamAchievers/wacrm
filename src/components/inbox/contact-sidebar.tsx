@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
-import type { Contact, Deal, ContactNote, Tag } from "@/types";
+import type { Contact, Deal, ContactNote, Tag, Conversation } from "@/types";
 import {
   Phone,
   Mail,
@@ -15,6 +15,8 @@ import {
   DollarSign,
   StickyNote,
   Plus,
+  Calendar,
+  Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -22,9 +24,10 @@ import { format } from "date-fns";
 
 interface ContactSidebarProps {
   contact: Contact | null;
+  conversation?: Conversation | null;
 }
 
-export function ContactSidebar({ contact }: ContactSidebarProps) {
+export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
   const { accountId } = useAuth();
   const [copied, setCopied] = useState(false);
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -170,6 +173,25 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
               <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground">
                 <Mail className="h-4 w-4 text-muted-foreground" />
                 <span className="truncate">{contact.email}</span>
+              </div>
+            )}
+
+            {conversation && (
+              <div className="mt-2 border-t border-border/40 pt-2 space-y-1.5 px-3">
+                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <Calendar className="h-3.5 w-3.5 text-muted-foreground/60" />
+                  <span>Started:</span>
+                  <span className="font-medium text-foreground">
+                    {format(new Date(conversation.created_at), "MMM d, yyyy h:mm a")}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <Clock className="h-3.5 w-3.5 text-muted-foreground/60" />
+                  <span>Last Update:</span>
+                  <span className="font-medium text-foreground">
+                    {format(new Date(conversation.updated_at), "MMM d, yyyy h:mm a")}
+                  </span>
+                </div>
               </div>
             )}
           </div>
