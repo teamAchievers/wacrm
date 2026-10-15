@@ -716,8 +716,23 @@ async function processMessage(
     unread_count: (conversation.unread_count || 0) + 1,
     updated_at: new Date().toISOString(),
   }
-  if (referralData && !conversation.referral_data) {
+  if (referralData) {
     convUpdate.referral_data = referralData
+  } else if (!conversation.referral_data && contactRecord?.id) {
+    // If inbound message has no referral data and conversation lacks attribution,
+    // check if this contact had a prior conversation with referral_data to inherit
+    const { data: priorConv } = await supabaseAdmin()
+      .from('conversations')
+      .select('referral_data')
+      .eq('contact_id', contactRecord.id)
+      .not('referral_data', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (priorConv?.referral_data) {
+      convUpdate.referral_data = priorConv.referral_data
+    }
   }
 
   let { error: convError } = await supabaseAdmin()
@@ -736,6 +751,16 @@ async function processMessage(
 
   if (convError) {
     console.error('Error updating conversation:', convError)
+  }
+
+  // If referral was present, propagate to any sibling conversations for this contact
+  if (referralData && contactRecord?.id) {
+    await supabaseAdmin()
+      .from('conversations')
+      .update({ referral_data: referralData })
+      .eq('contact_id', contactRecord.id)
+      .neq('id', conversation.id)
+      .catch(() => {})
   }
 
   // If this contact was a recent broadcast recipient, flag the reply
@@ -1095,17 +1120,48 @@ async function findOrCreateConversation(
     return existing
   }
 
+  // Check if contact has any prior conversation with referral_data to inherit
+  let inheritedReferral: ReferralData | null = null
+  const { data: priorConv } = await supabaseAdmin()
+    .from('conversations')
+    .select('referral_data')
+    .eq('contact_id', contactId)
+    .not('referral_data', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (priorConv?.referral_data) {
+    inheritedReferral = priorConv.referral_data as ReferralData
+  }
+
   // Create new conversation. Same tenancy + audit split as
   // findOrCreateContact above.
-  const { data: newConv, error: createError } = await supabaseAdmin()
+  const convPayload: Record<string, unknown> = {
+    account_id: accountId,
+    user_id: configOwnerUserId,
+    contact_id: contactId,
+  }
+  if (inheritedReferral) {
+    convPayload.referral_data = inheritedReferral
+  }
+
+  let { data: newConv, error: createError } = await supabaseAdmin()
     .from('conversations')
-    .insert({
-      account_id: accountId,
-      user_id: configOwnerUserId,
-      contact_id: contactId,
-    })
+    .insert(convPayload)
     .select()
     .single()
+
+  if (createError && (createError.message?.includes('referral_data') || (createError as { code?: string })?.code === '42703')) {
+    delete convPayload.referral_data
+    const retry = await supabaseAdmin()
+      .from('conversations')
+      .insert(convPayload)
+      .select()
+      .single()
+    newConv = retry.data
+    createError = retry.error
+  }
 
   if (createError) {
     console.error('Error creating conversation:', createError)

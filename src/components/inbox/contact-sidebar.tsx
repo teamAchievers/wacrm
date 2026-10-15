@@ -142,6 +142,52 @@ export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
     setLocalReferral(conversation?.referral_data ?? null);
     setIsEditingAd(false);
 
+    // If active conversation lacks referral_data, automatically inherit from contact's past conversations
+    if (conversation?.id && !conversation.referral_data && contact?.id) {
+      const inheritPriorAttribution = async () => {
+        try {
+          const supabase = createClient();
+          const { data: priorConv } = await supabase
+            .from("conversations")
+            .select("referral_data")
+            .eq("contact_id", contact.id)
+            .not("referral_data", "is", null)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (priorConv?.referral_data) {
+            const inherited = priorConv.referral_data as ReferralData;
+            setLocalReferral(inherited);
+            await supabase
+              .from("conversations")
+              .update({ referral_data: inherited })
+              .eq("id", conversation.id);
+
+            // If it's an ad and lacks campaign_name, auto-enrich from Meta
+            if (
+              inherited.source_type !== "organic" &&
+              !inherited.campaign_name &&
+              (inherited.ad_id || inherited.source_id)
+            ) {
+              const res = await fetch("/api/whatsapp/conversations/fetch-ad", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ conversationId: conversation.id }),
+              });
+              const data = await res.json().catch(() => ({}));
+              if (data?.success && data?.referral_data) {
+                setLocalReferral(data.referral_data);
+              }
+            }
+          }
+        } catch {
+          // Ignore lookup errors
+        }
+      };
+      inheritPriorAttribution();
+    }
+
     // Auto-backfill if conversation has ad referral but lacks campaign_name
     if (
       conversation?.id &&
@@ -163,7 +209,7 @@ export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
         })
         .catch(() => {});
     }
-  }, [conversation?.id, conversation?.referral_data]);
+  }, [conversation?.id, conversation?.referral_data, contact?.id]);
 
   const handleSaveAd = async () => {
     if (!conversation) return;
@@ -200,6 +246,15 @@ export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
         console.error("Failed to update chat source attribution:", error);
         toast.error("Failed to update chat source");
         return;
+      }
+
+      // Propagate attribution to all conversations of this contact so all chats share the source
+      const contactId = conversation.contact_id || contact?.id;
+      if (contactId) {
+        await supabase
+          .from("conversations")
+          .update({ referral_data: updated })
+          .eq("contact_id", contactId);
       }
 
       setLocalReferral(updated);

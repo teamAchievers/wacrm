@@ -121,31 +121,100 @@ export async function POST(request: Request) {
 
     // If still no ad ID, search any sibling conversation for the same contact
     if (!targetAdId && conv.contact_id) {
-      const { data: contactConvs } = await admin
+      // 1. Check if any sibling conversation has referral_data with an Ad ID
+      const { data: convWithRef } = await admin
         .from('conversations')
-        .select('id')
+        .select('referral_data')
         .eq('contact_id', conv.contact_id)
+        .not('referral_data', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
 
-      if (contactConvs && contactConvs.length > 0) {
-        const convIds = contactConvs.map((c: { id: string }) => c.id)
-        const { data: msgWithRef } = await admin
-          .from('messages')
-          .select('referral_data')
-          .in('conversation_id', convIds)
-          .not('referral_data', 'is', null)
-          .order('created_at', { ascending: true })
-          .limit(1)
+      if (convWithRef?.referral_data) {
+        existingReferral = { ...existingReferral, ...(convWithRef.referral_data as ReferralData) }
+        targetAdId = existingReferral.ad_id || existingReferral.source_id
+      }
+
+      // 2. Also check messages across all conversations for this contact
+      if (!targetAdId) {
+        const { data: contactConvs } = await admin
+          .from('conversations')
+          .select('id')
+          .eq('contact_id', conv.contact_id)
+
+        if (contactConvs && contactConvs.length > 0) {
+          const convIds = contactConvs.map((c: { id: string }) => c.id)
+          const { data: msgWithRef } = await admin
+            .from('messages')
+            .select('referral_data')
+            .in('conversation_id', convIds)
+            .not('referral_data', 'is', null)
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle()
+
+          if (msgWithRef?.referral_data) {
+            existingReferral = { ...existingReferral, ...(msgWithRef.referral_data as ReferralData) }
+            targetAdId = existingReferral.ad_id || existingReferral.source_id
+          }
+        }
+      }
+
+      // 3. Also check if the contact has duplicate contact records by phone number
+      if (!targetAdId) {
+        const { data: contactRow } = await admin
+          .from('contacts')
+          .select('phone')
+          .eq('id', conv.contact_id)
           .maybeSingle()
 
-        if (msgWithRef?.referral_data) {
-          existingReferral = { ...existingReferral, ...(msgWithRef.referral_data as ReferralData) }
-          targetAdId = existingReferral.ad_id || existingReferral.source_id
+        if (contactRow?.phone) {
+          const last8 = contactRow.phone.replace(/\D/g, '').slice(-8)
+          if (last8) {
+            const { data: duplicateContacts } = await admin
+              .from('contacts')
+              .select('id')
+              .ilike('phone', `%${last8}`)
+
+            if (duplicateContacts && duplicateContacts.length > 0) {
+              const dupContactIds = duplicateContacts.map((c: { id: string }) => c.id)
+              const { data: dupConvWithRef } = await admin
+                .from('conversations')
+                .select('referral_data')
+                .in('contact_id', dupContactIds)
+                .not('referral_data', 'is', null)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle()
+
+              if (dupConvWithRef?.referral_data) {
+                existingReferral = { ...existingReferral, ...(dupConvWithRef.referral_data as ReferralData) }
+                targetAdId = existingReferral.ad_id || existingReferral.source_id
+              }
+            }
+          }
         }
       }
     }
 
-    // If still no ad ID, return informative status prompting the user
+    // If we inherited existingReferral from a sibling conversation or message, save it to this conversation
+    if (existingReferral && Object.keys(existingReferral).length > 0 && !conv.referral_data) {
+      await admin
+        .from('conversations')
+        .update({ referral_data: existingReferral })
+        .eq('id', conv.id)
+    }
+
+    // If still no ad ID, return inherited attribution if available or informative status prompting user
     if (!targetAdId) {
+      if (existingReferral && Object.keys(existingReferral).length > 0) {
+        return NextResponse.json({
+          success: true,
+          message: 'Inherited chat source from previous conversation',
+          referral_data: existingReferral,
+        })
+      }
       return NextResponse.json({
         success: false,
         no_ad_id: true,
@@ -206,7 +275,7 @@ export async function POST(request: Request) {
       campaign_name: adDetails.campaign_name || existingReferral.campaign_name,
     }
 
-    // 7. Update conversation row
+    // 7. Update conversation row and propagate to any other chats for this contact
     const { error: updateError } = await admin
       .from('conversations')
       .update({ referral_data: updatedReferral })
@@ -218,6 +287,15 @@ export async function POST(request: Request) {
         { error: 'Failed to update conversation referral data: ' + updateError.message },
         { status: 500 }
       )
+    }
+
+    if (conv.contact_id) {
+      await admin
+        .from('conversations')
+        .update({ referral_data: updatedReferral })
+        .eq('contact_id', conv.contact_id)
+        .neq('id', conv.id)
+        .catch(() => {})
     }
 
     return NextResponse.json({
