@@ -36,11 +36,12 @@ const STATUS_COLORS: Record<ConversationStatus, string> = {
   closed: "bg-muted-foreground",
 };
 
-type InboxFilter = ConversationStatus | "all" | "unread" | "ads";
+type InboxFilter = ConversationStatus | "all" | "unread" | "ads" | "organic";
 
 const FILTER_OPTIONS: { label: string; value: InboxFilter }[] = [
   { label: "All", value: "all" },
   { label: "From Ads", value: "ads" },
+  { label: "Direct / Organic", value: "organic" },
   { label: "Unread", value: "unread" },
   { label: "Open", value: "open" },
   { label: "Pending", value: "pending" },
@@ -117,7 +118,25 @@ export function ConversationList({
     if (filter === "unread") {
       result = result.filter((c) => c.unread_count > 0);
     } else if (filter === "ads") {
-      result = result.filter((c) => c.referral_data != null);
+      result = result.filter(
+        (c) =>
+          c.referral_data != null &&
+          c.referral_data.source_type !== "organic" &&
+          (c.referral_data.campaign_name ||
+            c.referral_data.ad_name ||
+            c.referral_data.ad_id ||
+            c.referral_data.source_id)
+      );
+    } else if (filter === "organic") {
+      result = result.filter(
+        (c) =>
+          !c.referral_data ||
+          c.referral_data.source_type === "organic" ||
+          (!c.referral_data.campaign_name &&
+            !c.referral_data.ad_name &&
+            !c.referral_data.ad_id &&
+            !c.referral_data.source_id)
+      );
     } else if (filter !== "all") {
       result = result.filter((c) => c.status === filter);
     }
@@ -302,7 +321,12 @@ function ConversationItem({
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5 flex-1">
-            {conversation.referral_data && (
+            {conversation.referral_data &&
+            conversation.referral_data.source_type !== "organic" &&
+            (conversation.referral_data.campaign_name ||
+              conversation.referral_data.ad_name ||
+              conversation.referral_data.ad_id ||
+              conversation.referral_data.source_id) && (
               <span
                 className="inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-semibold bg-primary/10 text-primary border border-primary/20"
                 title={
