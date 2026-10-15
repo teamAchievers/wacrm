@@ -1143,6 +1143,22 @@ export function MessageThread({
           </div>
         ) : (
           <div className="space-y-4">
+            {/* Beginning of conversation reassurance banner */}
+            <div className="mx-auto my-2 max-w-sm rounded-xl border border-border/60 bg-background/80 p-3 text-center shadow-xs backdrop-blur-xs">
+              <div className="mx-auto mb-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <MessageSquare className="h-3.5 w-3.5" />
+              </div>
+              <p className="text-xs font-semibold text-foreground">
+                Beginning of conversation with {contact.name || contact.phone}
+              </p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Chat started on{" "}
+                {conversation.created_at
+                  ? format(new Date(conversation.created_at), "MMM d, yyyy 'at' h:mm a")
+                  : "earlier"}
+              </p>
+            </div>
+
             {messageGroups.map((group) => (
               <div key={group.date}>
                 {/* Date separator */}

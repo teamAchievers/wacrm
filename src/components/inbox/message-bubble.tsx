@@ -393,6 +393,14 @@ function MessageContent({ message }: { message: Message }) {
         message.content_text?.includes("[Unsupported message type: button]") ||
         message.content_text === "[Button reply]"
       ) {
+        const adHeadline = message.referral_data?.headline || message.referral_data?.body;
+        const replyText =
+          message.content_text.replace(/\[Unsupported message type: button\]/g, "").trim() ||
+          adHeadline ||
+          (message.interactive_reply_id
+            ? formatReplyId(message.interactive_reply_id)
+            : "Inquiry via Meta Ad / Quick Reply");
+
         return (
           <div className="flex flex-col gap-0.5">
             <span
@@ -402,13 +410,10 @@ function MessageContent({ message }: { message: Message }) {
               )}
             >
               <CornerDownLeft className="h-3 w-3" />
-              Button reply
+              {isOutbound ? "Button reply" : "Ad / Quick Reply Tap"}
             </span>
             <p className="whitespace-pre-wrap break-words text-sm font-medium">
-              {message.content_text.replace(/\[Unsupported message type: button\]/g, "").trim() ||
-                (message.interactive_reply_id
-                  ? formatReplyId(message.interactive_reply_id)
-                  : "Quick reply selected")}
+              {replyText}
             </p>
           </div>
         );
@@ -599,21 +604,41 @@ function MessageContent({ message }: { message: Message }) {
       );
     }
 
-    default:
+    case "button":
+    default: {
       if (
+        message.content_type === "button" ||
         message.content_text?.includes("[Unsupported message type: button]") ||
         message.content_text === "[Button reply]"
       ) {
+        const adHeadline = message.referral_data?.headline || message.referral_data?.body;
+        const cleanContent = message.content_text
+          ? message.content_text
+              .replace(/\[Unsupported message type: button\]/g, "")
+              .replace(/\[Button reply\]/g, "")
+              .trim()
+          : "";
+
+        const replyText =
+          cleanContent ||
+          adHeadline ||
+          (message.interactive_reply_id
+            ? formatReplyId(message.interactive_reply_id)
+            : "Started chat via Meta Ad / Quick Reply");
+
         return (
           <div className="flex flex-col gap-0.5">
-            <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide",
+                isOutbound ? "opacity-80" : "text-muted-foreground"
+              )}
+            >
               <CornerDownLeft className="h-3 w-3" />
-              Button reply
+              {isOutbound ? "Button reply" : "Ad / Quick Reply Tap"}
             </span>
-            <p className="text-sm font-medium">
-              {message.interactive_reply_id
-                ? formatReplyId(message.interactive_reply_id)
-                : "Quick reply selected"}
+            <p className="whitespace-pre-wrap break-words text-sm font-medium">
+              {replyText}
             </p>
           </div>
         );
@@ -623,6 +648,7 @@ function MessageContent({ message }: { message: Message }) {
           {message.content_text || "[Unsupported message type]"}
         </p>
       );
+    }
   }
 }
 
