@@ -384,6 +384,12 @@ export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
               <div className="mt-2">
                 {isEditingAd ? (
                   <div className="space-y-2.5 rounded-lg border border-border bg-muted/40 p-2.5 text-xs">
+                    <div className="rounded-md bg-primary/10 border border-primary/20 p-2 text-[11px] text-foreground/90 leading-relaxed">
+                      <p className="font-semibold text-primary text-[11px]">Attach Meta Ad</p>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">
+                        Enter your Meta <strong>Ad ID</strong> and click <em>Fetch from Meta</em> to pull campaign details automatically, or fill them in manually below.
+                      </p>
+                    </div>
                     <div>
                       <div className="flex items-center justify-between">
                         <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
