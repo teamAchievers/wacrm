@@ -73,16 +73,25 @@ export async function GET(
       )
     }
 
-    const storagePath = `account-${accountId}/inbound-${cleanMediaId}`
+    const normalizedMediaId = cleanMediaId.replace(/^inbound-/, '')
+    const storagePath = `account-${accountId}/inbound-${normalizedMediaId}`
 
     // 1. Check if media was already cached in Supabase Storage
     try {
-      const { data: cachedBlob, error: downloadErr } = await admin
-        .storage
-        .from('chat-media')
-        .download(storagePath)
+      let cachedBlob: Blob | null = null
+      const firstTry = await admin.storage.from('chat-media').download(storagePath)
+      if (!firstTry.error && firstTry.data) {
+        cachedBlob = firstTry.data
+      } else {
+        // Fallback check without inbound- prefix or with direct filename
+        const altPath = `account-${accountId}/${cleanMediaId}`
+        const secondTry = await admin.storage.from('chat-media').download(altPath)
+        if (!secondTry.error && secondTry.data) {
+          cachedBlob = secondTry.data
+        }
+      }
 
-      if (!downloadErr && cachedBlob) {
+      if (cachedBlob) {
         const arrayBuffer = await cachedBlob.arrayBuffer()
         return new Response(new Uint8Array(arrayBuffer), {
           status: 200,
@@ -147,10 +156,15 @@ export async function GET(
     const errMsg = error instanceof Error ? error.message : String(error)
     const isExpired =
       errMsg.includes('404') ||
+      errMsg.includes('410') ||
       errMsg.includes('100') ||
       errMsg.includes('expired') ||
       errMsg.includes('Media fetch failed') ||
-      errMsg.includes('Media URL not found')
+      errMsg.includes('Media URL not found') ||
+      errMsg.includes('GraphMethodException') ||
+      errMsg.includes('OAuthException') ||
+      errMsg.includes('Unsupported request') ||
+      errMsg.includes('does not exist')
 
     return NextResponse.json(
       {

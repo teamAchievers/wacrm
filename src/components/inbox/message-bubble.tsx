@@ -15,10 +15,16 @@ import {
   CornerDownLeft,
   Megaphone,
   ExternalLink,
+  Download,
+  ListFilter,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
 import { MessageReactions } from "./message-reactions";
+import {
+  resolveInteractiveOptions,
+  type InteractivePromptMetadata,
+} from "@/lib/whatsapp/interactive-prompts";
 
 interface MessageBubbleProps {
   message: Message;
@@ -176,12 +182,84 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   }
 
   return (
-    <img
-      src={src ?? ""}
-      alt={alt}
-      className="max-h-64 max-w-60 rounded-lg object-cover"
-      onError={() => setError(true)}
-    />
+    <div className="group relative max-h-64 max-w-60 overflow-hidden rounded-lg">
+      <img
+        src={src ?? ""}
+        alt={alt}
+        className="max-h-64 max-w-60 rounded-lg object-cover cursor-pointer transition-transform hover:scale-[1.01]"
+        onClick={() => {
+          if (src) window.open(src, "_blank");
+        }}
+        onError={() => setError(true)}
+      />
+      {src && (
+        <a
+          href={src}
+          download="whatsapp-image"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-black/80 group-hover:opacity-100 shadow-sm"
+          title="Download image"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Download className="h-3.5 w-3.5" />
+        </a>
+      )}
+    </div>
+  );
+}
+
+function InteractiveOptionsList({
+  meta,
+  onPrimary,
+}: {
+  meta: InteractivePromptMetadata;
+  onPrimary: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "mt-2.5 flex flex-col gap-1.5 border-t pt-2",
+        onPrimary ? "border-primary-foreground/20" : "border-border/40"
+      )}
+    >
+      {meta.button_label && (
+        <div
+          className={cn(
+            "flex items-center gap-1 text-[11px] font-semibold tracking-wide uppercase",
+            onPrimary ? "text-primary-foreground/90" : "text-muted-foreground"
+          )}
+        >
+          <ListFilter className="h-3.5 w-3.5" />
+          <span>{meta.button_label}</span>
+          <span className="text-[10px] font-normal opacity-75">
+            ({meta.options.length} options)
+          </span>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-1.5 pt-0.5">
+        {meta.options.map((opt) => (
+          <div
+            key={opt.id || opt.title}
+            className={cn(
+              "group inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-all shadow-sm",
+              onPrimary
+                ? "border-primary-foreground/30 bg-primary-foreground/10 text-primary-foreground hover:bg-primary-foreground/20"
+                : "border-border/60 bg-background/80 text-foreground hover:bg-muted"
+            )}
+            title={opt.description || opt.title}
+          >
+            <span
+              className={cn(
+                "h-1.5 w-1.5 rounded-full shrink-0",
+                onPrimary ? "bg-primary-foreground/70" : "bg-primary"
+              )}
+            />
+            <span className="truncate max-w-[220px]">{opt.title}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -298,13 +376,48 @@ function MediaAudio({ url }: { url: string }) {
 }
 
 function MessageContent({ message }: { message: Message }) {
+  const isOutbound = message.sender_type === "agent" || message.sender_type === "bot";
+  const interactiveMeta = resolveInteractiveOptions(message);
+
   switch (message.content_type) {
-    case "text":
+    case "text": {
+      if (
+        message.content_text?.includes("[Unsupported message type: button]") ||
+        message.content_text === "[Button reply]"
+      ) {
+        return (
+          <div className="flex flex-col gap-0.5">
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide",
+                isOutbound ? "opacity-80" : "text-muted-foreground"
+              )}
+            >
+              <CornerDownLeft className="h-3 w-3" />
+              Button reply
+            </span>
+            <p className="whitespace-pre-wrap break-words text-sm font-medium">
+              {message.content_text.replace(/\[Unsupported message type: button\]/g, "").trim() ||
+                "Quick reply selected"}
+            </p>
+          </div>
+        );
+      }
+
       return (
-        <p className="whitespace-pre-wrap break-words text-sm">
-          {message.content_text}
-        </p>
+        <div className="flex flex-col">
+          <p className="whitespace-pre-wrap break-words text-sm">
+            {message.content_text}
+          </p>
+          {interactiveMeta && (
+            <InteractiveOptionsList
+              meta={interactiveMeta}
+              onPrimary={isOutbound}
+            />
+          )}
+        </div>
       );
+    }
 
     case "image":
       return (
@@ -349,34 +462,88 @@ function MessageContent({ message }: { message: Message }) {
         </div>
       );
 
-    case "document":
+    case "document": {
       if (!message.media_url) {
         return <MediaUnavailable label={message.content_text || "Document"} />;
       }
+      const { fetchUrl } = resolveMediaUrl(message.media_url);
+      const filename = message.content_text || "Document";
+      const isPdf = /\.pdf$/i.test(filename) || filename.toLowerCase().includes("pdf");
+
       return (
-        <a
-          href={resolveMediaUrl(message.media_url).fetchUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm hover:bg-muted"
-        >
-          <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
-          <span className="truncate">
-            {message.content_text || "Document"}
-          </span>
-        </a>
+        <div className="flex flex-col gap-1.5 min-w-[200px]">
+          <a
+            href={fetchUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={cn(
+              "group flex items-center justify-between gap-3 rounded-xl border p-2.5 text-sm transition-all shadow-sm",
+              isOutbound
+                ? "border-primary-foreground/30 bg-primary-foreground/10 hover:bg-primary-foreground/20 text-primary-foreground"
+                : "border-border/60 bg-background/80 hover:bg-muted text-foreground"
+            )}
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div
+                className={cn(
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold uppercase",
+                  isPdf
+                    ? isOutbound
+                      ? "bg-red-400/20 text-red-200 border border-red-300/30"
+                      : "bg-red-500/10 text-red-600 border border-red-500/20"
+                    : isOutbound
+                      ? "bg-primary-foreground/20 text-primary-foreground"
+                      : "bg-primary/10 text-primary border border-primary/20"
+                )}
+              >
+                {isPdf ? "PDF" : <FileText className="h-4 w-4" />}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-xs font-medium">
+                  {filename}
+                </p>
+                <span
+                  className={cn(
+                    "text-[10px] block opacity-75",
+                    isOutbound ? "text-primary-foreground/80" : "text-muted-foreground"
+                  )}
+                >
+                  Click to open / download
+                </span>
+              </div>
+            </div>
+            <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-70 group-hover:opacity-100" />
+          </a>
+        </div>
       );
+    }
 
     case "template":
       return (
-        <div>
-          <span className="mb-1 inline-flex items-center gap-1 rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+        <div className="flex flex-col">
+          <span
+            className={cn(
+              "mb-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium w-fit",
+              isOutbound
+                ? "bg-primary-foreground/20 text-primary-foreground"
+                : "bg-primary/20 text-primary"
+            )}
+          >
             <LayoutTemplate className="h-3 w-3" />
             {message.template_name ? `Template: ${message.template_name}` : "Template"}
           </span>
-          <p className="mt-1 whitespace-pre-wrap break-words text-sm">
-            {message.content_text || (message.template_name ? `Automated template (${message.template_name})` : "Automated message sent")}
+          <p className="mt-0.5 whitespace-pre-wrap break-words text-sm">
+            {message.content_text ||
+              (message.template_name
+                ? `Automated template (${message.template_name})`
+                : "Automated message sent")}
           </p>
+          {interactiveMeta && (
+            <InteractiveOptionsList
+              meta={interactiveMeta}
+              onPrimary={isOutbound}
+            />
+          )}
         </div>
       );
 
@@ -389,7 +556,6 @@ function MessageContent({ message }: { message: Message }) {
       );
 
     case "interactive": {
-      const isOutbound = message.sender_type === "agent" || message.sender_type === "bot";
       return (
         <div className="flex flex-col gap-0.5">
           <span
@@ -413,20 +579,29 @@ function MessageContent({ message }: { message: Message }) {
           <p className="whitespace-pre-wrap break-words text-sm">
             {message.content_text || (isOutbound ? "[Interactive prompt]" : "[Button tapped]")}
           </p>
+          {isOutbound && interactiveMeta && (
+            <InteractiveOptionsList
+              meta={interactiveMeta}
+              onPrimary={isOutbound}
+            />
+          )}
         </div>
       );
     }
 
     default:
-      if (message.content_text === "[Unsupported message type: button]") {
+      if (
+        message.content_text?.includes("[Unsupported message type: button]") ||
+        message.content_text === "[Button reply]"
+      ) {
         return (
           <div className="flex flex-col gap-0.5">
             <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               <CornerDownLeft className="h-3 w-3" />
               Button reply
             </span>
-            <p className="italic text-xs text-muted-foreground">
-              Quick reply response
+            <p className="text-sm font-medium">
+              Quick reply selected
             </p>
           </div>
         );

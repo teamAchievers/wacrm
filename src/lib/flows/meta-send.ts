@@ -409,14 +409,33 @@ async function sendInteractiveViaMeta(
   // We do NOT set interactive_reply_id here — that column is reserved
   // for the customer's tap on this message, populated by the webhook
   // when their reply arrives.
-  const { error: msgErr } = await db.from('messages').insert({
+  // Persist interactive buttons/sections into referral_data JSONB
+  // so MessageBubble can faithfully render the options that were presented.
+  const interactiveData = {
+    kind: input.kind,
+    button_label: input.kind === 'list' ? input.buttonLabel : undefined,
+    header_text: input.headerText,
+    footer_text: input.footerText,
+    buttons: input.kind === 'buttons' ? input.buttons : undefined,
+    sections: input.kind === 'list' ? input.sections : undefined,
+  }
+
+  const messageInsert: Record<string, unknown> = {
     conversation_id: input.conversationId,
     sender_type: 'bot',
     content_type: 'interactive',
     content_text: input.bodyText,
     message_id: waMessageId,
     status: 'sent',
-  })
+    referral_data: { interactive_data: interactiveData },
+  }
+
+  let { error: msgErr } = await db.from('messages').insert(messageInsert)
+  if (msgErr && (msgErr.message?.includes('referral_data') || (msgErr as { code?: string })?.code === '42703')) {
+    delete messageInsert.referral_data
+    const retry = await db.from('messages').insert(messageInsert)
+    msgErr = retry.error
+  }
   if (msgErr) {
     throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
   }

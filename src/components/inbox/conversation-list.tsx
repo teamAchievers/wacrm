@@ -235,6 +235,17 @@ export function ConversationList({
   );
 }
 
+function formatLastMessagePreview(text: string | null | undefined): string {
+  if (!text) return "No messages yet";
+  if (text.includes("[Unsupported message type: button]")) {
+    return "↩ Button reply";
+  }
+  if (text.startsWith("[template:") && text.endsWith("]")) {
+    return `📋 ${text.slice(10, -1)}`;
+  }
+  return text;
+}
+
 interface ConversationItemProps {
   conversation: Conversation;
   isActive: boolean;
@@ -305,7 +316,7 @@ function ConversationItem({
               </span>
             )}
             <p className="truncate text-xs text-muted-foreground">
-              {conversation.last_message_text || "No messages yet"}
+              {formatLastMessagePreview(conversation.last_message_text)}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
