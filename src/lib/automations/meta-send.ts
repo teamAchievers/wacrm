@@ -144,8 +144,13 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
   // Meta message id. sender_type='bot' distinguishes automation sends
   // from manual agent sends.
   const content_type = input.kind === 'template' ? 'template' : 'text'
-  const content_text = input.kind === 'text' ? input.text : null
   const template_name = input.kind === 'template' ? input.templateName : null
+  const content_text =
+    input.kind === 'text'
+      ? input.text
+      : input.params && input.params.length > 0
+        ? `[Template: ${input.templateName}] ${input.params.join(', ')}`
+        : `[Template: ${input.templateName}]`
 
   const { error: msgErr } = await db.from('messages').insert({
     conversation_id: input.conversationId,

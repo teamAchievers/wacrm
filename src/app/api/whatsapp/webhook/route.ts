@@ -583,7 +583,7 @@ async function processMessage(
 
   // Parse message content based on type
   const { contentText, mediaUrl, mediaType, interactiveReplyId } =
-    await parseMessageContent(message, accessToken)
+    await parseMessageContent(message, accessToken, accountId)
 
   // Extract and resolve Meta Ad (CTWA) referral data if present
   let referralData: ReferralData | null = null
@@ -800,17 +800,12 @@ async function processMessage(
     | 'new_message_received'
     | 'keyword_match'
   )[] = []
-  // Content-level triggers are suppressed when a flow consumed the
-  // message — see the comment block above.
-  if (!flowConsumed) {
-    automationTriggers.push('new_message_received', 'keyword_match')
-  }
+  // Always trigger new_message_received and keyword_match so user automations
+  // (auto-responders, tagging, team alerts, assignments) run on all incoming messages
+  automationTriggers.push('new_message_received', 'keyword_match')
   // new_contact_created fires only when the webhook just auto-created the
   // contact row. first_inbound_message fires whenever this is the contact's
-  // first-ever customer-sent message — a superset that also catches
-  // manually-imported contacts sending for the first time. We dispatch both
-  // so users can pick whichever semantic they want; an automation that
-  // listens to only one trigger runs only when that trigger matches.
+  // first-ever customer-sent message.
   if (contactOutcome.wasCreated) automationTriggers.unshift('new_contact_created')
   if (isFirstInboundMessage) automationTriggers.unshift('first_inbound_message')
   for (const triggerType of automationTriggers) {
@@ -836,7 +831,8 @@ async function processMessage(
 
 async function parseMessageContent(
   message: WhatsAppMessage,
-  accessToken: string
+  accessToken: string,
+  accountId?: string
 ): Promise<{
   contentText: string | null
   mediaUrl: string | null
@@ -850,15 +846,33 @@ async function parseMessageContent(
    */
   interactiveReplyId: string | null
 }> {
-  // getMediaUrl signature is (mediaId, accessToken) — earlier code had
-  // the args swapped, so every verification hit an invalid Meta URL and
-  // fell through to the catch block, leaving mediaUrl as null. That's
-  // why images showed up as empty bubbles in the inbox.
   const verifyAndBuildUrl = async (
-    mediaId: string
+    mediaId: string,
+    mimeType?: string
   ): Promise<string | null> => {
     try {
-      await getMediaUrl({ mediaId, accessToken })
+      const mediaInfo = await getMediaUrl({ mediaId, accessToken })
+      // Proactively download and cache binary into chat-media bucket in Supabase storage
+      // so media never expires even after Meta purges temporary links
+      if (accountId && mediaInfo?.url) {
+        try {
+          const { buffer, contentType } = await downloadMedia({
+            downloadUrl: mediaInfo.url,
+            accessToken,
+          })
+          const finalType = contentType || mimeType || mediaInfo.mimeType || 'application/octet-stream'
+          const storagePath = `account-${accountId}/inbound-${mediaId}`
+          await supabaseAdmin()
+            .storage
+            .from('chat-media')
+            .upload(storagePath, buffer, {
+              contentType: finalType,
+              upsert: true,
+            })
+        } catch (storageErr) {
+          console.warn(`[webhook] background media download failed for ${mediaId}:`, storageErr)
+        }
+      }
       return `/api/whatsapp/media/${mediaId}`
     } catch (error) {
       console.error(
@@ -888,7 +902,7 @@ async function parseMessageContent(
         return {
           ...empty,
           contentText: message.image.caption || null,
-          mediaUrl: await verifyAndBuildUrl(message.image.id),
+          mediaUrl: await verifyAndBuildUrl(message.image.id, message.image.mime_type),
           mediaType: message.image.mime_type,
         }
       }
@@ -899,7 +913,7 @@ async function parseMessageContent(
         return {
           ...empty,
           contentText: message.video.caption || null,
-          mediaUrl: await verifyAndBuildUrl(message.video.id),
+          mediaUrl: await verifyAndBuildUrl(message.video.id, message.video.mime_type),
           mediaType: message.video.mime_type,
         }
       }
@@ -911,7 +925,7 @@ async function parseMessageContent(
           ...empty,
           contentText:
             message.document.caption || message.document.filename || null,
-          mediaUrl: await verifyAndBuildUrl(message.document.id),
+          mediaUrl: await verifyAndBuildUrl(message.document.id, message.document.mime_type),
           mediaType: message.document.mime_type,
         }
       }
@@ -921,7 +935,7 @@ async function parseMessageContent(
       if (message.audio?.id) {
         return {
           ...empty,
-          mediaUrl: await verifyAndBuildUrl(message.audio.id),
+          mediaUrl: await verifyAndBuildUrl(message.audio.id, message.audio.mime_type),
           mediaType: message.audio.mime_type,
         }
       }
@@ -934,7 +948,7 @@ async function parseMessageContent(
       if (message.sticker?.id) {
         return {
           ...empty,
-          mediaUrl: await verifyAndBuildUrl(message.sticker.id),
+          mediaUrl: await verifyAndBuildUrl(message.sticker.id, message.sticker.mime_type),
           mediaType: message.sticker.mime_type,
         }
       }

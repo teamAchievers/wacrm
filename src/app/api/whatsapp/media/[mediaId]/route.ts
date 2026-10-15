@@ -144,9 +144,22 @@ export async function GET(
     })
   } catch (error) {
     console.error('Error in WhatsApp media GET:', error)
+    const errMsg = error instanceof Error ? error.message : String(error)
+    const isExpired =
+      errMsg.includes('404') ||
+      errMsg.includes('100') ||
+      errMsg.includes('expired') ||
+      errMsg.includes('Media fetch failed') ||
+      errMsg.includes('Media URL not found')
+
     return NextResponse.json(
-      { error: 'Failed to fetch media' },
-      { status: 500 }
+      {
+        error: isExpired
+          ? 'Media has expired on WhatsApp servers (media is stored for ~30 days by Meta)'
+          : 'Failed to fetch media',
+        expired: isExpired,
+      },
+      { status: isExpired ? 410 : 500 }
     )
   }
 }

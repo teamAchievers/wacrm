@@ -69,12 +69,18 @@ function resolveMediaUrl(url: string): { fetchUrl: string; isProxy: boolean } {
   if (/^\d+$/.test(trimmed)) {
     return { fetchUrl: `/api/whatsapp/media/${trimmed}`, isProxy: true };
   }
+  // Lookaside URL with mid query parameter
+  const midMatch = trimmed.match(/[?&]mid=(\d+)/);
+  if (midMatch) {
+    return { fetchUrl: `/api/whatsapp/media/${midMatch[1]}`, isProxy: true };
+  }
   return { fetchUrl: trimmed, isProxy: false };
 }
 
 function MediaImage({ url, alt }: { url: string; alt: string }) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const [isExpired, setIsExpired] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const { fetchUrl, isProxy } = useMemo(() => resolveMediaUrl(url), [url]);
@@ -86,6 +92,11 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
     if (isProxy) {
       try {
         const res = await fetch(fetchUrl);
+        if (res.status === 410) {
+          setIsExpired(true);
+          setError(true);
+          return;
+        }
         if (!res.ok) throw new Error(`Failed to load media: ${res.status}`);
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
@@ -113,20 +124,45 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   }, [loadImage]);
 
   if (error) {
+    if (isExpired) {
+      return (
+        <div className="flex h-32 w-56 flex-col items-center justify-center gap-1.5 rounded-lg bg-muted/60 p-3 text-center border border-border/40">
+          <ImageOff className="h-6 w-6 text-muted-foreground/60" />
+          <span className="text-xs font-medium text-foreground">Media expired</span>
+          <span className="text-[10px] text-muted-foreground leading-tight">
+            Attachment expired on Meta servers (WhatsApp retains temporary media for ~30 days)
+          </span>
+        </div>
+      );
+    }
+
     return (
-      <div className="flex h-40 w-60 flex-col items-center justify-center gap-1 rounded-lg bg-muted p-2 text-center">
+      <div className="flex h-40 w-60 flex-col items-center justify-center gap-1.5 rounded-lg bg-muted p-2 text-center">
         <ImageOff className="h-8 w-8 text-muted-foreground" />
-        <button
-          type="button"
-          onClick={() => {
-            setError(false);
-            setLoading(true);
-            loadImage();
-          }}
-          className="text-xs font-medium text-primary hover:underline"
-        >
-          Retry loading
-        </button>
+        <span className="text-xs text-muted-foreground">Image preview failed</span>
+        <div className="flex items-center gap-2 mt-1">
+          <button
+            type="button"
+            onClick={() => {
+              setError(false);
+              setLoading(true);
+              loadImage();
+            }}
+            className="text-xs font-medium text-primary hover:underline"
+          >
+            Retry
+          </button>
+          {fetchUrl && (
+            <a
+              href={fetchUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-muted-foreground hover:underline"
+            >
+              Open link
+            </a>
+          )}
+        </div>
       </div>
     );
   }
@@ -336,13 +372,11 @@ function MessageContent({ message }: { message: Message }) {
         <div>
           <span className="mb-1 inline-flex items-center gap-1 rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium text-primary">
             <LayoutTemplate className="h-3 w-3" />
-            Template
+            {message.template_name ? `Template: ${message.template_name}` : "Template"}
           </span>
-          {message.content_text && (
-            <p className="mt-1 whitespace-pre-wrap break-words text-sm">
-              {message.content_text}
-            </p>
-          )}
+          <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+            {message.content_text || (message.template_name ? `Automated template (${message.template_name})` : "Automated message sent")}
+          </p>
         </div>
       );
 
@@ -355,19 +389,29 @@ function MessageContent({ message }: { message: Message }) {
       );
 
     case "interactive": {
-      // Customer tapped a reply button or list row on a message the bot
-      // sent. We show the tapped option's title (already in content_text,
-      // set by parseMessageContent in the webhook) with a small affordance
-      // so agents reading the inbox can tell at a glance that this is a
-      // tap rather than the customer typing the same words.
+      const isOutbound = message.sender_type === "agent" || message.sender_type === "bot";
       return (
         <div className="flex flex-col gap-0.5">
-          <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            <CornerDownLeft className="h-3 w-3" />
-            Button reply
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide",
+              isOutbound ? "opacity-80" : "text-muted-foreground"
+            )}
+          >
+            {isOutbound ? (
+              <>
+                <LayoutTemplate className="h-3 w-3" />
+                Interactive Prompt
+              </>
+            ) : (
+              <>
+                <CornerDownLeft className="h-3 w-3" />
+                Button reply
+              </>
+            )}
           </span>
           <p className="whitespace-pre-wrap break-words text-sm">
-            {message.content_text || "[Interactive reply]"}
+            {message.content_text || (isOutbound ? "[Interactive prompt]" : "[Button tapped]")}
           </p>
         </div>
       );

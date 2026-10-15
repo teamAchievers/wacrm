@@ -21,6 +21,7 @@ import {
   ExternalLink,
   Pencil,
   X,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +49,7 @@ export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
   );
   const [isEditingAd, setIsEditingAd] = useState(false);
   const [savingAd, setSavingAd] = useState(false);
+  const [fetchingAd, setFetchingAd] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Form states for manual attribution edit/add
@@ -58,9 +60,74 @@ export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
   const [formAdName, setFormAdName] = useState("");
   const [formAdId, setFormAdId] = useState("");
 
+  const handleFetchAdDetails = useCallback(
+    async (customAdId?: string) => {
+      if (!conversation) return;
+      setFetchingAd(true);
+      try {
+        const res = await fetch("/api/whatsapp/conversations/fetch-ad", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversationId: conversation.id,
+            adId:
+              customAdId?.trim() ||
+              formAdId.trim() ||
+              localReferral?.ad_id ||
+              localReferral?.source_id,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast.error(data.error || "Failed to fetch ad details from Meta");
+          return;
+        }
+        if (data.success && data.referral_data) {
+          setLocalReferral(data.referral_data);
+          setFormCampaignName(data.referral_data.campaign_name ?? "");
+          setFormCampaignId(data.referral_data.campaign_id ?? "");
+          setFormAdsetName(data.referral_data.adset_name ?? "");
+          setFormAdsetId(data.referral_data.adset_id ?? "");
+          setFormAdName(data.referral_data.ad_name ?? "");
+          setFormAdId(
+            data.referral_data.ad_id ?? data.referral_data.source_id ?? ""
+          );
+          toast.success(data.message || "Ad details fetched from Meta");
+        } else {
+          toast.info(data.message || "No ad details found for this conversation");
+        }
+      } catch (e) {
+        console.error("fetch ad details error:", e);
+        toast.error("Failed to connect to Meta API");
+      } finally {
+        setFetchingAd(false);
+      }
+    },
+    [conversation, formAdId, localReferral]
+  );
+
   useEffect(() => {
     setLocalReferral(conversation?.referral_data ?? null);
     setIsEditingAd(false);
+
+    // Auto-backfill if conversation doesn't have referral_data or lacks campaign_name
+    if (
+      conversation?.id &&
+      (!conversation.referral_data || !conversation.referral_data.campaign_name)
+    ) {
+      fetch("/api/whatsapp/conversations/fetch-ad", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: conversation.id }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data?.success && data?.referral_data) {
+            setLocalReferral(data.referral_data);
+          }
+        })
+        .catch(() => {});
+    }
   }, [conversation?.id, conversation?.referral_data]);
 
   const startEditingAd = () => {
@@ -289,20 +356,53 @@ export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
                   <Megaphone className="h-3.5 w-3.5 text-primary" />
                   <span>Ad Attribution</span>
                 </div>
-                {!isEditingAd && (
+                <div className="flex items-center gap-2">
                   <button
-                    onClick={startEditingAd}
-                    className="flex items-center gap-1 text-[11px] font-normal capitalize tracking-normal text-primary hover:underline"
+                    onClick={() => handleFetchAdDetails()}
+                    disabled={fetchingAd}
+                    title="Fetch Ad & Campaign details from Meta"
+                    className="flex items-center gap-1 text-[11px] font-normal capitalize tracking-normal text-muted-foreground hover:text-foreground"
                   >
-                    <Pencil className="h-3 w-3" />
-                    <span>{localReferral ? "Edit" : "Add"}</span>
+                    <RefreshCw className={cn("h-3 w-3", fetchingAd && "animate-spin text-primary")} />
+                    <span>{fetchingAd ? "Fetching..." : "Fetch"}</span>
                   </button>
-                )}
+                  {!isEditingAd && (
+                    <button
+                      onClick={startEditingAd}
+                      className="flex items-center gap-1 text-[11px] font-normal capitalize tracking-normal text-primary hover:underline"
+                    >
+                      <Pencil className="h-3 w-3" />
+                      <span>{localReferral ? "Edit" : "Add"}</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="mt-2">
                 {isEditingAd ? (
                   <div className="space-y-2.5 rounded-lg border border-border bg-muted/40 p-2.5 text-xs">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                          Ad ID (Meta source_id)
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleFetchAdDetails(formAdId)}
+                          disabled={!formAdId.trim() || fetchingAd}
+                          className="flex items-center gap-1 text-[10px] font-medium text-primary hover:underline disabled:opacity-50"
+                        >
+                          <RefreshCw className={cn("h-2.5 w-2.5", fetchingAd && "animate-spin")} />
+                          <span>Fetch from Meta</span>
+                        </button>
+                      </div>
+                      <Input
+                        value={formAdId}
+                        onChange={(e) => setFormAdId(e.target.value)}
+                        placeholder="e.g. 1202058392021"
+                        className="mt-1 h-7 font-mono text-xs bg-background"
+                      />
+                    </div>
                     <div>
                       <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                         Campaign Name
@@ -356,17 +456,6 @@ export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
                         onChange={(e) => setFormAdName(e.target.value)}
                         placeholder="e.g. Video Ad - Feature Demo"
                         className="mt-1 h-7 text-xs bg-background"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                        Ad ID
-                      </label>
-                      <Input
-                        value={formAdId}
-                        onChange={(e) => setFormAdId(e.target.value)}
-                        placeholder="e.g. 1202058392021"
-                        className="mt-1 h-7 font-mono text-xs bg-background"
                       />
                     </div>
                     <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-border/50">
@@ -544,13 +633,26 @@ export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
                     <p className="text-[11px] text-muted-foreground">
                       No ad attribution for this conversation
                     </p>
-                    <button
-                      type="button"
-                      onClick={startEditingAd}
-                      className="mt-1 text-[11px] font-medium text-primary hover:underline"
-                    >
-                      + Add Campaign Details
-                    </button>
+                    <div className="mt-2 flex items-center justify-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleFetchAdDetails()}
+                        disabled={fetchingAd}
+                        className="h-6 text-[10px] px-2"
+                      >
+                        <RefreshCw className={cn("mr-1 h-3 w-3", fetchingAd && "animate-spin text-primary")} />
+                        {fetchingAd ? "Fetching..." : "Fetch from Meta"}
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={startEditingAd}
+                        className="text-[11px] font-medium text-primary hover:underline"
+                      >
+                        + Add Manually
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
