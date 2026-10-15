@@ -32,10 +32,11 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}))
     const { conversationId, adId } = body as { conversationId?: string; adId?: string }
 
-    if (!conversationId) {
+    if (!conversationId || typeof conversationId !== 'string') {
       return NextResponse.json({ error: 'conversationId is required' }, { status: 400 })
     }
 
+    const trimmedConvId = conversationId.trim()
     const admin = supabaseAdmin()
 
     // 1. Resolve user's account_id
@@ -56,32 +57,57 @@ export async function POST(request: Request) {
       accountId = (member as { account_id?: string } | null)?.account_id
     }
 
-    if (!accountId) {
-      return NextResponse.json({ error: 'Account not resolved' }, { status: 403 })
-    }
-
-    // 2. Fetch conversation
+    // 2. Fetch conversation by primary key ID first
     const { data: conv, error: convErr } = await admin
       .from('conversations')
-      .select('id, account_id, referral_data')
-      .eq('id', conversationId)
-      .eq('account_id', accountId)
+      .select('*')
+      .eq('id', trimmedConvId)
       .maybeSingle()
 
-    if (convErr || !conv) {
+    if (convErr) {
+      console.error('[fetch-ad] error querying conversation:', convErr)
+      return NextResponse.json(
+        { error: `Database error: ${convErr.message}` },
+        { status: 500 }
+      )
+    }
+
+    if (!conv) {
       return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
+    }
+
+    // Authorization check: user must either own the conversation directly or belong to the same account
+    const isOwner = conv.user_id === user.id
+    const isAccountMatch = Boolean(accountId && conv.account_id && conv.account_id === accountId)
+    if (!isOwner && !isAccountMatch) {
+      return NextResponse.json(
+        { error: 'Access denied: conversation does not belong to your account' },
+        { status: 403 }
+      )
+    }
+
+    // If conversation was missing account_id but user profile has one, backfill it
+    if (!conv.account_id && accountId) {
+      await admin
+        .from('conversations')
+        .update({ account_id: accountId })
+        .eq('id', conv.id)
+        .catch((err: unknown) => {
+          console.warn('[fetch-ad] warning backfilling account_id:', err)
+        })
     }
 
     // 3. Determine target Ad ID and existing referral data
     let existingReferral: ReferralData = (conv.referral_data as ReferralData) || {}
-    let targetAdId: string | undefined = adId?.trim() || existingReferral.ad_id || existingReferral.source_id
+    let targetAdId: string | undefined =
+      adId?.trim() || existingReferral.ad_id || existingReferral.source_id
 
     // If no ad ID yet, check if any message in this conversation has referral_data
     if (!targetAdId) {
       const { data: msgWithRef } = await admin
         .from('messages')
         .select('referral_data')
-        .eq('conversation_id', conversationId)
+        .eq('conversation_id', trimmedConvId)
         .not('referral_data', 'is', null)
         .order('created_at', { ascending: true })
         .limit(1)
@@ -93,37 +119,76 @@ export async function POST(request: Request) {
       }
     }
 
-    // If still no ad ID, return current referral data or notice
+    // If still no ad ID, search any sibling conversation for the same contact
+    if (!targetAdId && conv.contact_id) {
+      const { data: contactConvs } = await admin
+        .from('conversations')
+        .select('id')
+        .eq('contact_id', conv.contact_id)
+
+      if (contactConvs && contactConvs.length > 0) {
+        const convIds = contactConvs.map((c: { id: string }) => c.id)
+        const { data: msgWithRef } = await admin
+          .from('messages')
+          .select('referral_data')
+          .in('conversation_id', convIds)
+          .not('referral_data', 'is', null)
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .maybeSingle()
+
+        if (msgWithRef?.referral_data) {
+          existingReferral = { ...existingReferral, ...(msgWithRef.referral_data as ReferralData) }
+          targetAdId = existingReferral.ad_id || existingReferral.source_id
+        }
+      }
+    }
+
+    // If still no ad ID, return informative status prompting the user
     if (!targetAdId) {
       return NextResponse.json({
         success: false,
-        message: 'No Ad ID found on this conversation. Please enter an Ad ID to fetch details.',
+        no_ad_id: true,
+        message: 'No Meta Ad ID associated with this chat yet. Enter an Ad ID or edit attribution manually.',
         referral_data: existingReferral,
       })
     }
 
     // 4. Fetch WhatsApp config to get access token for Meta Graph API
-    const { data: config, error: configError } = await admin
-      .from('whatsapp_config')
-      .select('*')
-      .eq('account_id', accountId)
-      .maybeSingle()
-
-    if (configError || !config) {
-      return NextResponse.json({ error: 'WhatsApp is not configured for this account' }, { status: 400 })
+    let configQuery = admin.from('whatsapp_config').select('*')
+    if (accountId) {
+      configQuery = configQuery.or(`account_id.eq.${accountId},user_id.eq.${user.id}`)
+    } else {
+      configQuery = configQuery.eq('user_id', user.id)
     }
 
-    const accessToken = decrypt(config.access_token)
+    const { data: config, error: configError } = await configQuery.limit(1).maybeSingle()
+
+    if (configError || !config) {
+      return NextResponse.json(
+        { error: 'WhatsApp is not configured. Please connect WhatsApp in Settings.' },
+        { status: 400 }
+      )
+    }
+
+    let accessToken: string
+    try {
+      accessToken = decrypt(config.access_token)
+    } catch (decryptErr) {
+      console.error('[fetch-ad] failed to decrypt access_token:', decryptErr)
+      return NextResponse.json(
+        { error: 'WhatsApp access token could not be decrypted. Please reconnect in Settings.' },
+        { status: 400 }
+      )
+    }
 
     // 5. Query Meta Graph API for ad details
     const adDetails = await getAdDetails({ adId: targetAdId, accessToken })
 
     if (!adDetails) {
-      // Even if Meta API failed to resolve details (e.g. ad ID doesn't exist or token lacks ads_read permission),
-      // we still preserve what we have
       return NextResponse.json({
         success: false,
-        message: `Could not fetch ad details from Meta for Ad ID: ${targetAdId}. Verify the Ad ID and that your Meta System User has ads_read permission.`,
+        message: `Could not fetch ad details from Meta for Ad ID: ${targetAdId}. Verify that the Ad ID is correct and that your Meta system user / token has ads_read permission.`,
         referral_data: existingReferral,
       })
     }
@@ -145,11 +210,14 @@ export async function POST(request: Request) {
     const { error: updateError } = await admin
       .from('conversations')
       .update({ referral_data: updatedReferral })
-      .eq('id', conversationId)
+      .eq('id', conv.id)
 
     if (updateError) {
       console.error('[fetch-ad] failed to update conversation referral_data:', updateError)
-      return NextResponse.json({ error: 'Failed to update conversation referral data' }, { status: 500 })
+      return NextResponse.json(
+        { error: 'Failed to update conversation referral data: ' + updateError.message },
+        { status: 500 }
+      )
     }
 
     return NextResponse.json({
@@ -158,7 +226,7 @@ export async function POST(request: Request) {
       referral_data: updatedReferral,
     })
   } catch (err) {
-    console.error('[fetch-ad] error:', err)
+    console.error('[fetch-ad] unexpected error:', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

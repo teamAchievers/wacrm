@@ -60,6 +60,16 @@ export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
   const [formAdName, setFormAdName] = useState("");
   const [formAdId, setFormAdId] = useState("");
 
+  const startEditingAd = useCallback(() => {
+    setFormCampaignName(localReferral?.campaign_name ?? "");
+    setFormCampaignId(localReferral?.campaign_id ?? "");
+    setFormAdsetName(localReferral?.adset_name ?? "");
+    setFormAdsetId(localReferral?.adset_id ?? "");
+    setFormAdName(localReferral?.ad_name ?? "");
+    setFormAdId(localReferral?.ad_id ?? localReferral?.source_id ?? "");
+    setIsEditingAd(true);
+  }, [localReferral]);
+
   const handleFetchAdDetails = useCallback(
     async (customAdId?: string) => {
       if (!conversation) return;
@@ -95,6 +105,9 @@ export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
           toast.success(data.message || "Ad details fetched from Meta");
         } else {
           toast.info(data.message || "No ad details found for this conversation");
+          if (data.no_ad_id) {
+            startEditingAd();
+          }
         }
       } catch (e) {
         console.error("fetch ad details error:", e);
@@ -103,7 +116,7 @@ export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
         setFetchingAd(false);
       }
     },
-    [conversation, formAdId, localReferral]
+    [conversation, formAdId, localReferral, startEditingAd]
   );
 
   useEffect(() => {
@@ -129,16 +142,6 @@ export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
         .catch(() => {});
     }
   }, [conversation?.id, conversation?.referral_data]);
-
-  const startEditingAd = () => {
-    setFormCampaignName(localReferral?.campaign_name ?? "");
-    setFormCampaignId(localReferral?.campaign_id ?? "");
-    setFormAdsetName(localReferral?.adset_name ?? "");
-    setFormAdsetId(localReferral?.adset_id ?? "");
-    setFormAdName(localReferral?.ad_name ?? "");
-    setFormAdId(localReferral?.ad_id ?? localReferral?.source_id ?? "");
-    setIsEditingAd(true);
-  };
 
   const handleSaveAd = async () => {
     if (!conversation) return;
