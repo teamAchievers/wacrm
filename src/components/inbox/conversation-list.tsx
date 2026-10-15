@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus } from "@/types";
-import { Search, ChevronDown } from "lucide-react";
+import { Search, ChevronDown, Megaphone } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Input } from "@/components/ui/input";
 import {
@@ -36,10 +36,11 @@ const STATUS_COLORS: Record<ConversationStatus, string> = {
   closed: "bg-muted-foreground",
 };
 
-type InboxFilter = ConversationStatus | "all" | "unread";
+type InboxFilter = ConversationStatus | "all" | "unread" | "ads";
 
 const FILTER_OPTIONS: { label: string; value: InboxFilter }[] = [
   { label: "All", value: "all" },
+  { label: "From Ads", value: "ads" },
   { label: "Unread", value: "unread" },
   { label: "Open", value: "open" },
   { label: "Pending", value: "pending" },
@@ -115,6 +116,8 @@ export function ConversationList({
 
     if (filter === "unread") {
       result = result.filter((c) => c.unread_count > 0);
+    } else if (filter === "ads") {
+      result = result.filter((c) => c.referral_data != null);
     } else if (filter !== "all") {
       result = result.filter((c) => c.status === filter);
     }
@@ -125,7 +128,15 @@ export function ConversationList({
         const name = c.contact?.name?.toLowerCase() ?? "";
         const phone = c.contact?.phone?.toLowerCase() ?? "";
         const lastMsg = c.last_message_text?.toLowerCase() ?? "";
-        return name.includes(q) || phone.includes(q) || lastMsg.includes(q);
+        const campaignName = c.referral_data?.campaign_name?.toLowerCase() ?? "";
+        const adName = c.referral_data?.ad_name?.toLowerCase() ?? "";
+        return (
+          name.includes(q) ||
+          phone.includes(q) ||
+          lastMsg.includes(q) ||
+          campaignName.includes(q) ||
+          adName.includes(q)
+        );
       });
     }
 
@@ -279,9 +290,24 @@ function ConversationItem({
           <span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo}</span>
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className="truncate text-xs text-muted-foreground">
-            {conversation.last_message_text || "No messages yet"}
-          </p>
+          <div className="flex min-w-0 items-center gap-1.5 flex-1">
+            {conversation.referral_data && (
+              <span
+                className="inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-semibold bg-primary/10 text-primary border border-primary/20"
+                title={
+                  conversation.referral_data.campaign_name
+                    ? `Ad Campaign: ${conversation.referral_data.campaign_name}`
+                    : "From Meta Ad"
+                }
+              >
+                <Megaphone className="h-2.5 w-2.5" />
+                Ad
+              </span>
+            )}
+            <p className="truncate text-xs text-muted-foreground">
+              {conversation.last_message_text || "No messages yet"}
+            </p>
+          </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {conversation.unread_count > 0 && (
               <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">

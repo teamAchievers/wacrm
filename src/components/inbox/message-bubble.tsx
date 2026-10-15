@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import type { Message, MessageReaction } from "@/types";
 import {
@@ -13,6 +13,8 @@ import {
   LayoutTemplate,
   ImageOff,
   CornerDownLeft,
+  Megaphone,
+  ExternalLink,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
@@ -372,12 +374,95 @@ function MessageContent({ message }: { message: Message }) {
     }
 
     default:
+      if (message.content_text === "[Unsupported message type: button]") {
+        return (
+          <div className="flex flex-col gap-0.5">
+            <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <CornerDownLeft className="h-3 w-3" />
+              Button reply
+            </span>
+            <p className="italic text-xs text-muted-foreground">
+              Quick reply response
+            </p>
+          </div>
+        );
+      }
       return (
         <p className="whitespace-pre-wrap break-words text-sm">
           {message.content_text || "[Unsupported message type]"}
         </p>
       );
   }
+}
+
+function AdReferralCard({ referral }: { referral: NonNullable<Message["referral_data"]> }) {
+  return (
+    <div className="mb-2 max-w-sm overflow-hidden rounded-xl border border-primary/20 bg-background/70 p-2.5 text-xs text-foreground shadow-sm">
+      <div className="flex items-center justify-between gap-1 border-b border-border/40 pb-1.5">
+        <div className="flex items-center gap-1.5 font-semibold text-primary text-[11px]">
+          <Megaphone className="h-3.5 w-3.5" />
+          <span>Meta Ad Referral</span>
+        </div>
+        {referral.source_url && (
+          <a
+            href={referral.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary hover:underline"
+          >
+            <span>View Ad</span>
+            <ExternalLink className="h-2.5 w-2.5" />
+          </a>
+        )}
+      </div>
+
+      {(referral.image_url || referral.thumbnail_url) && (
+        <div className="mt-2 overflow-hidden rounded-lg border border-border/30">
+          <img
+            src={referral.image_url || referral.thumbnail_url}
+            alt={referral.headline || "Ad media"}
+            className="max-h-36 w-full object-cover"
+            onError={(e) => {
+              (e.currentTarget as HTMLElement).style.display = "none";
+            }}
+          />
+        </div>
+      )}
+
+      {referral.headline && (
+        <p className="mt-1.5 font-semibold text-foreground text-xs leading-snug">
+          {referral.headline}
+        </p>
+      )}
+
+      {referral.body && (
+        <p className="mt-0.5 text-[11px] text-muted-foreground line-clamp-2">
+          {referral.body}
+        </p>
+      )}
+
+      {(referral.campaign_name || referral.ad_name) && (
+        <div className="mt-2 flex flex-wrap gap-1 border-t border-border/30 pt-1.5 text-[10px] text-muted-foreground">
+          {referral.campaign_name && (
+            <span
+              className="rounded bg-muted px-1.5 py-0.5 font-medium truncate max-w-[200px]"
+              title={`Campaign: ${referral.campaign_name}`}
+            >
+              Camp: {referral.campaign_name}
+            </span>
+          )}
+          {referral.ad_name && (
+            <span
+              className="rounded bg-muted px-1.5 py-0.5 font-medium truncate max-w-[200px]"
+              title={`Ad: ${referral.ad_name}`}
+            >
+              Ad: {referral.ad_name}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function MessageBubble({
@@ -413,6 +498,9 @@ export function MessageBubble({
             preview={reply.preview}
             onPrimary={isAgent}
           />
+        )}
+        {message.referral_data && (
+          <AdReferralCard referral={message.referral_data} />
         )}
         <MessageContent message={message} />
         <div

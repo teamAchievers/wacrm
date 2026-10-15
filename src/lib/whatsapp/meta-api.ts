@@ -1069,3 +1069,54 @@ export async function downloadMedia(
   return { buffer, contentType }
 }
 
+// ============================================================
+// Ads & Referral Attribution (Click-to-WhatsApp)
+// ============================================================
+
+export interface MetaAdDetails {
+  ad_id: string
+  ad_name?: string
+  adset_id?: string
+  adset_name?: string
+  campaign_id?: string
+  campaign_name?: string
+}
+
+/**
+ * Fetch ad, adset, and campaign metadata from Meta Graph API using the ad ID (source_id).
+ * Uses field expansion: fields=id,name,campaign{id,name},adset{id,name}.
+ */
+export async function getAdDetails(args: {
+  adId: string
+  accessToken: string
+}): Promise<MetaAdDetails | null> {
+  const { adId, accessToken } = args
+  if (!adId) return null
+  try {
+    const url = `${META_API_BASE}/${adId}?fields=id,name,campaign{id,name},adset{id,name}`
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'User-Agent': 'curl/7.64.1',
+      },
+    })
+    if (!response.ok) {
+      console.warn(`[getAdDetails] Meta API returned ${response.status} for ad ${adId}`)
+      return null
+    }
+    const data = await response.json()
+    return {
+      ad_id: String(data.id || adId),
+      ad_name: data.name || undefined,
+      adset_id: data.adset?.id ? String(data.adset.id) : undefined,
+      adset_name: data.adset?.name || undefined,
+      campaign_id: data.campaign?.id ? String(data.campaign.id) : undefined,
+      campaign_name: data.campaign?.name || undefined,
+    }
+  } catch (error) {
+    console.warn(`[getAdDetails] Failed to fetch ad details for ${adId}:`, error)
+    return null
+  }
+}
+
+

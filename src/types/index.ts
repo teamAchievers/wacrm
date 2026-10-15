@@ -144,6 +144,25 @@ export interface ContactNote {
 
 export type ConversationStatus = 'open' | 'pending' | 'closed';
 
+export interface ReferralData {
+  source_type?: string;
+  source_id?: string;
+  source_url?: string;
+  headline?: string;
+  body?: string;
+  media_type?: string;
+  image_url?: string;
+  video_url?: string;
+  thumbnail_url?: string;
+  ctwa_clid?: string;
+  ad_id?: string;
+  ad_name?: string;
+  adset_id?: string;
+  adset_name?: string;
+  campaign_id?: string;
+  campaign_name?: string;
+}
+
 export interface Conversation {
   id: string;
   user_id: string;
@@ -157,6 +176,7 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   contact?: Contact;
+  referral_data?: ReferralData | null;
 }
 
 export type SenderType = 'customer' | 'agent' | 'bot';
@@ -192,7 +212,9 @@ export interface Message {
    * cue (renders with a "↩ button reply" affordance).
    */
   interactive_reply_id?: string;
+  referral_data?: ReferralData | null;
 }
+
 
 export type ReactionActor = 'customer' | 'agent';
 

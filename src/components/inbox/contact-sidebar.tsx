@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
-import type { Contact, Deal, ContactNote, Tag, Conversation } from "@/types";
+import type { Contact, Deal, ContactNote, Tag, Conversation, ReferralData } from "@/types";
 import {
   Phone,
   Mail,
@@ -17,10 +17,16 @@ import {
   Plus,
   Calendar,
   Clock,
+  Megaphone,
+  ExternalLink,
+  Pencil,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
+import { toast } from "sonner";
 
 interface ContactSidebarProps {
   contact: Contact | null;
@@ -35,6 +41,82 @@ export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
   const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
+
+  // Referral / Ad Attribution states
+  const [localReferral, setLocalReferral] = useState<ReferralData | null>(
+    conversation?.referral_data ?? null
+  );
+  const [isEditingAd, setIsEditingAd] = useState(false);
+  const [savingAd, setSavingAd] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  // Form states for manual attribution edit/add
+  const [formCampaignName, setFormCampaignName] = useState("");
+  const [formCampaignId, setFormCampaignId] = useState("");
+  const [formAdsetName, setFormAdsetName] = useState("");
+  const [formAdsetId, setFormAdsetId] = useState("");
+  const [formAdName, setFormAdName] = useState("");
+  const [formAdId, setFormAdId] = useState("");
+
+  useEffect(() => {
+    setLocalReferral(conversation?.referral_data ?? null);
+    setIsEditingAd(false);
+  }, [conversation?.id, conversation?.referral_data]);
+
+  const startEditingAd = () => {
+    setFormCampaignName(localReferral?.campaign_name ?? "");
+    setFormCampaignId(localReferral?.campaign_id ?? "");
+    setFormAdsetName(localReferral?.adset_name ?? "");
+    setFormAdsetId(localReferral?.adset_id ?? "");
+    setFormAdName(localReferral?.ad_name ?? "");
+    setFormAdId(localReferral?.ad_id ?? localReferral?.source_id ?? "");
+    setIsEditingAd(true);
+  };
+
+  const handleSaveAd = async () => {
+    if (!conversation) return;
+    setSavingAd(true);
+    try {
+      const updated: ReferralData = {
+        ...(localReferral || {}),
+        source_type: localReferral?.source_type || "ad",
+        campaign_name: formCampaignName.trim() || undefined,
+        campaign_id: formCampaignId.trim() || undefined,
+        adset_name: formAdsetName.trim() || undefined,
+        adset_id: formAdsetId.trim() || undefined,
+        ad_name: formAdName.trim() || undefined,
+        ad_id: formAdId.trim() || undefined,
+        source_id: formAdId.trim() || localReferral?.source_id || undefined,
+      };
+
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("conversations")
+        .update({ referral_data: updated })
+        .eq("id", conversation.id);
+
+      if (error) {
+        console.error("Failed to update ad referral:", error);
+        toast.error("Failed to update ad attribution");
+        return;
+      }
+
+      setLocalReferral(updated);
+      setIsEditingAd(false);
+      toast.success("Ad attribution updated");
+    } catch (e) {
+      console.error("Save ad error:", e);
+      toast.error("Failed to save ad details");
+    } finally {
+      setSavingAd(false);
+    }
+  };
+
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 1500);
+  };
 
   const fetchContactData = useCallback(async () => {
     if (!contact) return;
@@ -195,6 +277,285 @@ export function ContactSidebar({ contact, conversation }: ContactSidebarProps) {
               </div>
             )}
           </div>
+
+          {/* Divider */}
+          <div className="my-4 border-t border-border" />
+
+          {/* Ad & Campaign Attribution */}
+          {conversation && (
+            <div>
+              <div className="flex items-center justify-between px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <Megaphone className="h-3.5 w-3.5 text-primary" />
+                  <span>Ad Attribution</span>
+                </div>
+                {!isEditingAd && (
+                  <button
+                    onClick={startEditingAd}
+                    className="flex items-center gap-1 text-[11px] font-normal capitalize tracking-normal text-primary hover:underline"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    <span>{localReferral ? "Edit" : "Add"}</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="mt-2">
+                {isEditingAd ? (
+                  <div className="space-y-2.5 rounded-lg border border-border bg-muted/40 p-2.5 text-xs">
+                    <div>
+                      <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                        Campaign Name
+                      </label>
+                      <Input
+                        value={formCampaignName}
+                        onChange={(e) => setFormCampaignName(e.target.value)}
+                        placeholder="e.g. Summer Promo 2026"
+                        className="mt-1 h-7 text-xs bg-background"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                        Campaign ID
+                      </label>
+                      <Input
+                        value={formCampaignId}
+                        onChange={(e) => setFormCampaignId(e.target.value)}
+                        placeholder="e.g. 1202058392019"
+                        className="mt-1 h-7 font-mono text-xs bg-background"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                        Ad Set Name
+                      </label>
+                      <Input
+                        value={formAdsetName}
+                        onChange={(e) => setFormAdsetName(e.target.value)}
+                        placeholder="e.g. Lookalike 1% - India"
+                        className="mt-1 h-7 text-xs bg-background"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                        Ad Set ID
+                      </label>
+                      <Input
+                        value={formAdsetId}
+                        onChange={(e) => setFormAdsetId(e.target.value)}
+                        placeholder="e.g. 1202058392020"
+                        className="mt-1 h-7 font-mono text-xs bg-background"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                        Ad Name
+                      </label>
+                      <Input
+                        value={formAdName}
+                        onChange={(e) => setFormAdName(e.target.value)}
+                        placeholder="e.g. Video Ad - Feature Demo"
+                        className="mt-1 h-7 text-xs bg-background"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                        Ad ID
+                      </label>
+                      <Input
+                        value={formAdId}
+                        onChange={(e) => setFormAdId(e.target.value)}
+                        placeholder="e.g. 1202058392021"
+                        className="mt-1 h-7 font-mono text-xs bg-background"
+                      />
+                    </div>
+                    <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-border/50">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setIsEditingAd(false)}
+                        disabled={savingAd}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-7 text-xs bg-primary hover:bg-primary/90"
+                        onClick={handleSaveAd}
+                        disabled={savingAd}
+                      >
+                        {savingAd ? "Saving..." : "Save Details"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : localReferral ? (
+                  <div className="space-y-2 rounded-lg border border-border/60 bg-muted/30 p-2.5 text-xs">
+                    {(localReferral.image_url || localReferral.thumbnail_url) && (
+                      <div className="overflow-hidden rounded-md border border-border/40">
+                        <img
+                          src={localReferral.image_url || localReferral.thumbnail_url}
+                          alt={localReferral.headline || "Ad creative"}
+                          className="max-h-28 w-full object-cover"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLElement).style.display = "none";
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    {localReferral.headline && (
+                      <div className="rounded bg-background/50 p-2 border border-border/30">
+                        <p className="font-semibold text-foreground text-xs leading-tight">
+                          {localReferral.headline}
+                        </p>
+                        {localReferral.body && (
+                          <p className="mt-1 text-[11px] text-muted-foreground line-clamp-2">
+                            {localReferral.body}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="space-y-1.5">
+                      {/* Campaign */}
+                      <div className="rounded bg-background/60 p-2 border border-border/30">
+                        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                          Campaign
+                        </div>
+                        <div className="mt-0.5 text-xs font-semibold text-foreground truncate" title={localReferral.campaign_name}>
+                          {localReferral.campaign_name || "—"}
+                        </div>
+                        <div className="mt-0.5 flex items-center justify-between text-[10px] font-mono text-muted-foreground">
+                          <span className="truncate">ID: {localReferral.campaign_id || "—"}</span>
+                          {localReferral.campaign_id && (
+                            <button
+                              onClick={() => copyToClipboard(localReferral.campaign_id!, "camp_id")}
+                              className="ml-1 p-0.5 hover:text-foreground shrink-0"
+                              title="Copy Campaign ID"
+                            >
+                              {copiedField === "camp_id" ? (
+                                <Check className="h-3 w-3 text-primary" />
+                              ) : (
+                                <Copy className="h-3 w-3" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Ad Set */}
+                      <div className="rounded bg-background/60 p-2 border border-border/30">
+                        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                          Ad Set
+                        </div>
+                        <div className="mt-0.5 text-xs font-semibold text-foreground truncate" title={localReferral.adset_name}>
+                          {localReferral.adset_name || "—"}
+                        </div>
+                        <div className="mt-0.5 flex items-center justify-between text-[10px] font-mono text-muted-foreground">
+                          <span className="truncate">ID: {localReferral.adset_id || "—"}</span>
+                          {localReferral.adset_id && (
+                            <button
+                              onClick={() => copyToClipboard(localReferral.adset_id!, "adset_id")}
+                              className="ml-1 p-0.5 hover:text-foreground shrink-0"
+                              title="Copy Ad Set ID"
+                            >
+                              {copiedField === "adset_id" ? (
+                                <Check className="h-3 w-3 text-primary" />
+                              ) : (
+                                <Copy className="h-3 w-3" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Ad */}
+                      <div className="rounded bg-background/60 p-2 border border-border/30">
+                        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                          Ad
+                        </div>
+                        <div className="mt-0.5 text-xs font-semibold text-foreground truncate" title={localReferral.ad_name}>
+                          {localReferral.ad_name || "—"}
+                        </div>
+                        <div className="mt-0.5 flex items-center justify-between text-[10px] font-mono text-muted-foreground">
+                          <span className="truncate">ID: {localReferral.ad_id || localReferral.source_id || "—"}</span>
+                          {(localReferral.ad_id || localReferral.source_id) && (
+                            <button
+                              onClick={() =>
+                                copyToClipboard(
+                                  (localReferral.ad_id || localReferral.source_id)!,
+                                  "ad_id"
+                                )
+                              }
+                              className="ml-1 p-0.5 hover:text-foreground shrink-0"
+                              title="Copy Ad ID"
+                            >
+                              {copiedField === "ad_id" ? (
+                                <Check className="h-3 w-3 text-primary" />
+                              ) : (
+                                <Copy className="h-3 w-3" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* CTWA Click ID */}
+                      {localReferral.ctwa_clid && (
+                        <div className="flex items-center justify-between px-1 text-[10px] font-mono text-muted-foreground">
+                          <span className="truncate" title={localReferral.ctwa_clid}>
+                            Click ID: {localReferral.ctwa_clid.slice(0, 16)}...
+                          </span>
+                          <button
+                            onClick={() => copyToClipboard(localReferral.ctwa_clid!, "ctwa_clid")}
+                            className="ml-1 p-0.5 hover:text-foreground shrink-0"
+                            title="Copy Click ID"
+                          >
+                            {copiedField === "ctwa_clid" ? (
+                              <Check className="h-3 w-3 text-primary" />
+                            ) : (
+                              <Copy className="h-3 w-3" />
+                            )}
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Source URL Link */}
+                      {localReferral.source_url && (
+                        <div className="pt-0.5">
+                          <a
+                            href={localReferral.source_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-center gap-1.5 rounded-md border border-border/60 bg-background/50 py-1.5 text-[11px] font-medium text-primary transition-colors hover:bg-background"
+                          >
+                            <span>View Ad on Meta</span>
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-border/70 p-3 text-center">
+                    <p className="text-[11px] text-muted-foreground">
+                      No ad attribution for this conversation
+                    </p>
+                    <button
+                      type="button"
+                      onClick={startEditingAd}
+                      className="mt-1 text-[11px] font-medium text-primary hover:underline"
+                    >
+                      + Add Campaign Details
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Divider */}
           <div className="my-4 border-t border-border" />

@@ -1,7 +1,8 @@
 import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
-import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
+import { getMediaUrl, downloadMedia, getAdDetails, type MetaAdDetails } from '@/lib/whatsapp/meta-api'
+import type { ReferralData } from '@/types'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
@@ -68,6 +69,11 @@ interface WhatsAppMessage {
     source_url?: string
     headline?: string
     body?: string
+    media_type?: string
+    image_url?: string
+    video_url?: string
+    thumbnail_url?: string
+    ctwa_clid?: string
   }
 }
 
@@ -579,6 +585,46 @@ async function processMessage(
   const { contentText, mediaUrl, mediaType, interactiveReplyId } =
     await parseMessageContent(message, accessToken)
 
+  // Extract and resolve Meta Ad (CTWA) referral data if present
+  let referralData: ReferralData | null = null
+  if (message.referral) {
+    const ref = message.referral
+    let adDetails: MetaAdDetails | null = null
+    if (ref.source_id && (ref.source_type === 'ad' || !ref.source_type)) {
+      try {
+        adDetails = await getAdDetails({ adId: ref.source_id, accessToken })
+      } catch (err) {
+        console.warn('[webhook] failed to fetch ad details from Meta:', err)
+      }
+    }
+
+    referralData = {
+      source_type: ref.source_type || 'ad',
+      source_id: ref.source_id,
+      source_url: ref.source_url,
+      headline: ref.headline,
+      body: ref.body,
+      media_type: ref.media_type,
+      image_url: ref.image_url,
+      video_url: ref.video_url,
+      thumbnail_url: ref.thumbnail_url,
+      ctwa_clid: ref.ctwa_clid,
+      ad_id: adDetails?.ad_id || ref.source_id,
+      ad_name: adDetails?.ad_name || ref.headline,
+      adset_id: adDetails?.adset_id,
+      adset_name: adDetails?.adset_name,
+      campaign_id: adDetails?.campaign_id,
+      campaign_name: adDetails?.campaign_name,
+    }
+  }
+
+  // If inbound message came from an ad and had no text body, resolve from headline/body
+  const resolvedContentText =
+    contentText ||
+    (referralData
+      ? referralData.headline || referralData.body || '[Ad inquiry]'
+      : null)
+
   // Resolve swipe-reply context if present. A missing parent is fine —
   // we just store NULL and the UI renders the message without a quote.
   let replyToInternalId: string | null = null
@@ -632,11 +678,11 @@ async function processMessage(
     .eq('sender_type', 'customer')
   const isFirstInboundMessage = (priorCustomerMsgCount ?? 0) === 0
 
-  const { error: msgError } = await supabaseAdmin().from('messages').insert({
+  const messageInsert: Record<string, unknown> = {
     conversation_id: conversation.id,
     sender_type: 'customer',
     content_type: contentType,
-    content_text: contentText,
+    content_text: resolvedContentText,
     media_url: mediaUrl,
     message_id: message.id,
     status: 'delivered',
@@ -646,7 +692,17 @@ async function processMessage(
     // the column; null for every other content_type so existing inserts
     // behave identically.
     interactive_reply_id: interactiveReplyId,
-  })
+  }
+  if (referralData) {
+    messageInsert.referral_data = referralData
+  }
+
+  let { error: msgError } = await supabaseAdmin().from('messages').insert(messageInsert)
+  if (msgError && (msgError.message?.includes('referral_data') || (msgError as { code?: string })?.code === '42703')) {
+    delete messageInsert.referral_data
+    const retry = await supabaseAdmin().from('messages').insert(messageInsert)
+    msgError = retry.error
+  }
 
   if (msgError) {
     console.error('Error inserting message:', msgError)
@@ -654,15 +710,29 @@ async function processMessage(
   }
 
   // Update conversation
-  const { error: convError } = await supabaseAdmin()
+  const convUpdate: Record<string, unknown> = {
+    last_message_text: resolvedContentText || (referralData ? `[Ad: ${referralData.headline || 'Referral'}]` : `[${message.type}]`),
+    last_message_at: new Date().toISOString(),
+    unread_count: (conversation.unread_count || 0) + 1,
+    updated_at: new Date().toISOString(),
+  }
+  if (referralData && !conversation.referral_data) {
+    convUpdate.referral_data = referralData
+  }
+
+  let { error: convError } = await supabaseAdmin()
     .from('conversations')
-    .update({
-      last_message_text: contentText || `[${message.type}]`,
-      last_message_at: new Date().toISOString(),
-      unread_count: (conversation.unread_count || 0) + 1,
-      updated_at: new Date().toISOString(),
-    })
+    .update(convUpdate)
     .eq('id', conversation.id)
+
+  if (convError && (convError.message?.includes('referral_data') || (convError as { code?: string })?.code === '42703')) {
+    delete convUpdate.referral_data
+    const retry = await supabaseAdmin()
+      .from('conversations')
+      .update(convUpdate)
+      .eq('id', conversation.id)
+    convError = retry.error
+  }
 
   if (convError) {
     console.error('Error updating conversation:', convError)
@@ -704,13 +774,13 @@ async function processMessage(
         ? {
             kind: 'interactive_reply',
             reply_id: interactiveReplyId,
-            reply_title: contentText ?? '',
+            reply_title: resolvedContentText ?? '',
             meta_message_id: message.id,
             is_meta_referral: isMetaReferral,
           }
         : {
             kind: 'text',
-            text: contentText ?? message.text?.body ?? '',
+            text: resolvedContentText ?? message.text?.body ?? '',
             meta_message_id: message.id,
             is_meta_referral: isMetaReferral,
           },
@@ -723,7 +793,7 @@ async function processMessage(
   // message all exist before any step — including send_message — runs.
   // Fire-and-forget: a slow or failing automation must not block the
   // webhook's 200 OK response to Meta.
-  const inboundText = contentText ?? message.text?.body ?? ''
+  const inboundText = resolvedContentText ?? message.text?.body ?? ''
   const automationTriggers: (
     | 'new_contact_created'
     | 'first_inbound_message'
