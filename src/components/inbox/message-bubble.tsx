@@ -375,6 +375,14 @@ function MediaAudio({ url }: { url: string }) {
   return <audio src={src ?? ""} controls className="max-w-60" />;
 }
 
+function formatReplyId(id: string | null | undefined): string {
+  if (!id) return "Quick reply selected";
+  return id
+    .replace(/^(btn_|row_|goal_|svc_|ind_|mkt_|ch_|tl_)/, "")
+    .replace(/[_-]/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function MessageContent({ message }: { message: Message }) {
   const isOutbound = message.sender_type === "agent" || message.sender_type === "bot";
   const interactiveMeta = resolveInteractiveOptions(message);
@@ -398,7 +406,9 @@ function MessageContent({ message }: { message: Message }) {
             </span>
             <p className="whitespace-pre-wrap break-words text-sm font-medium">
               {message.content_text.replace(/\[Unsupported message type: button\]/g, "").trim() ||
-                "Quick reply selected"}
+                (message.interactive_reply_id
+                  ? formatReplyId(message.interactive_reply_id)
+                  : "Quick reply selected")}
             </p>
           </div>
         );
@@ -601,7 +611,9 @@ function MessageContent({ message }: { message: Message }) {
               Button reply
             </span>
             <p className="text-sm font-medium">
-              Quick reply selected
+              {message.interactive_reply_id
+                ? formatReplyId(message.interactive_reply_id)
+                : "Quick reply selected"}
             </p>
           </div>
         );

@@ -6,6 +6,7 @@ import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder'
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard'
 import {
   sanitizePhoneForMeta,
+  normalizePhone,
   isValidE164,
   phoneVariants,
   isRecipientNotAllowedError,
@@ -232,6 +233,73 @@ export async function POST(request: Request) {
           whatsapp_message_id: sentMessageId,
         })
         sentCount++
+
+        // Persist to conversations & messages table so the sent broadcast template
+        // is recorded in the customer's chat thread
+        try {
+          const cleanPhone = normalizePhone(recipient.phone)
+          const last8 = cleanPhone.slice(-8)
+          const { data: matchedContact } = await supabase
+            .from('contacts')
+            .select('id')
+            .eq('account_id', accountId)
+            .ilike('phone', `%${last8}`)
+            .limit(1)
+            .maybeSingle()
+
+          if (matchedContact) {
+            let convId: string | null = null
+            const { data: existingConv } = await supabase
+              .from('conversations')
+              .select('id')
+              .eq('account_id', accountId)
+              .eq('contact_id', matchedContact.id)
+              .limit(1)
+              .maybeSingle()
+
+            if (existingConv) {
+              convId = existingConv.id
+            } else {
+              const { data: newConv } = await supabase
+                .from('conversations')
+                .insert({
+                  account_id: accountId,
+                  user_id: user.id,
+                  contact_id: matchedContact.id,
+                  last_message_text: `[Template: ${template_name}]`,
+                  last_message_at: new Date().toISOString(),
+                })
+                .select('id')
+                .single()
+              if (newConv) convId = newConv.id
+            }
+
+            if (convId) {
+              await supabase.from('messages').insert({
+                conversation_id: convId,
+                sender_type: 'bot',
+                content_type: 'template',
+                template_name,
+                content_text: recipient.params?.length
+                  ? `[Template: ${template_name}] ${recipient.params.join(', ')}`
+                  : `[Template: ${template_name}]`,
+                message_id: sentMessageId,
+                status: 'sent',
+              })
+
+              await supabase
+                .from('conversations')
+                .update({
+                  last_message_text: `[Template: ${template_name}]`,
+                  last_message_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', convId)
+            }
+          }
+        } catch (dbErr) {
+          console.warn('[broadcast] failed to persist message to inbox thread:', dbErr)
+        }
       } else {
         console.error(
           `Failed to send broadcast to ${recipient.phone}:`,

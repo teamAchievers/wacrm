@@ -282,31 +282,113 @@ export function MessageThread({
     (async () => {
       setLoading(true);
 
-      const { data, error } = await supabase
-        .from("messages")
-        .select("*")
-        .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true });
+      try {
+        // 1. Gather all contact IDs matching this contact (including duplicate/variant phone contacts)
+        let allContactIds = contact?.id ? [contact.id] : [];
+        const digits = contact?.phone?.replace(/\D/g, "");
+        if (digits && digits.length >= 8) {
+          const last8 = digits.slice(-8);
+          const { data: matchedContacts } = await supabase
+            .from("contacts")
+            .select("id")
+            .ilike("phone", `%${last8}`);
+          if (matchedContacts && matchedContacts.length > 0) {
+            allContactIds = Array.from(
+              new Set([...allContactIds, ...matchedContacts.map((c) => c.id)])
+            );
+          }
+        }
 
-      if (cancelled) return;
+        // 2. Find all conversation IDs across these matched contacts
+        let convIds = [conversationId];
+        if (allContactIds.length > 0) {
+          const { data: convRows } = await supabase
+            .from("conversations")
+            .select("id")
+            .in("contact_id", allContactIds);
+          if (convRows && convRows.length > 0) {
+            convIds = Array.from(
+              new Set([...convIds, ...convRows.map((c) => c.id)])
+            );
+          }
+        }
 
-      if (error) {
-        console.error("Failed to fetch messages:", error);
-      } else {
-        onMessagesLoadedRef.current(data ?? []);
+        // 3. Fetch all messages across conversations for this customer
+        const { data: dbMessages, error: msgError } = await supabase
+          .from("messages")
+          .select("*")
+          .in("conversation_id", convIds)
+          .order("created_at", { ascending: true });
+
+        if (msgError) {
+          console.error("Failed to fetch messages:", msgError);
+        }
+
+        // 4. Fetch any broadcasts sent to this contact that aren't already represented in messages
+        let broadcastMessages: Message[] = [];
+        if (allContactIds.length > 0) {
+          try {
+            const { data: broadcastRecs } = await supabase
+              .from("broadcast_recipients")
+              .select(
+                "id, status, sent_at, created_at, broadcasts(id, name, template_name)"
+              )
+              .in("contact_id", allContactIds)
+              .in("status", ["sent", "delivered", "read", "replied"])
+              .order("created_at", { ascending: true });
+
+            if (broadcastRecs && broadcastRecs.length > 0) {
+              broadcastMessages = (broadcastRecs as unknown as Array<{
+                id: string;
+                status: string;
+                sent_at: string | null;
+                created_at: string;
+                broadcasts?: { id: string; name: string; template_name: string } | null;
+              }>)
+                .filter((br) => {
+                  const brTime = new Date(br.sent_at || br.created_at).getTime();
+                  return !dbMessages?.some((m) => {
+                    const mTime = new Date(m.created_at).getTime();
+                    return Math.abs(mTime - brTime) < 60000;
+                  });
+                })
+                .map((br) => ({
+                  id: `broadcast-${br.id}`,
+                  conversation_id: conversationId,
+                  sender_type: "bot" as const,
+                  content_type: "template" as const,
+                  template_name: br.broadcasts?.template_name || br.broadcasts?.name,
+                  content_text: `[Broadcast: ${
+                    br.broadcasts?.template_name || br.broadcasts?.name || "Template"
+                  }]`,
+                  created_at: br.sent_at || br.created_at,
+                  status: (br.status === "failed" ? "failed" : "sent") as Message["status"],
+                }));
+            }
+          } catch (brErr) {
+            console.warn("Failed to fetch broadcast history for contact:", brErr);
+          }
+        }
+
+        if (cancelled) return;
+
+        const combined = [...(dbMessages ?? []), ...broadcastMessages].sort(
+          (a, b) =>
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+
+        onMessagesLoadedRef.current(combined);
+      } catch (err) {
+        console.error("Unexpected error in fetchMessages:", err);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-
-      if (!cancelled) setLoading(false);
     })();
 
     return () => {
       cancelled = true;
     };
-    // `resyncToken` is included so the parent can force a refetch when
-    // the realtime channel reconnects or the tab regains focus —
-    // realtime is best-effort and any message events sent while the WS
-    // was disconnected or throttled are otherwise lost.
-  }, [conversationId, resyncToken]);
+  }, [conversationId, contact?.id, contact?.phone, resyncToken]);
 
   // Reactions fetch — pulls the current state from the DB. Kept separate
   // from the channel subscription below so a `resyncToken` bump just
