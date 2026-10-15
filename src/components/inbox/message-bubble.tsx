@@ -53,18 +53,37 @@ function MediaUnavailable({ label }: { label: string }) {
   );
 }
 
+function resolveMediaUrl(url: string): { fetchUrl: string; isProxy: boolean } {
+  if (!url) return { fetchUrl: "", isProxy: false };
+  const trimmed = url.trim();
+  if (trimmed.startsWith("/api/whatsapp/media/")) {
+    return { fetchUrl: trimmed, isProxy: true };
+  }
+  if (trimmed.includes("/api/whatsapp/media/")) {
+    const after = trimmed.split("/api/whatsapp/media/")[1];
+    return { fetchUrl: `/api/whatsapp/media/${after}`, isProxy: true };
+  }
+  // Pure digits = Meta media ID directly stored
+  if (/^\d+$/.test(trimmed)) {
+    return { fetchUrl: `/api/whatsapp/media/${trimmed}`, isProxy: true };
+  }
+  return { fetchUrl: trimmed, isProxy: false };
+}
+
 function MediaImage({ url, alt }: { url: string; alt: string }) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const { fetchUrl, isProxy } = useMemo(() => resolveMediaUrl(url), [url]);
+
   const loadImage = useCallback(async () => {
-    if (!url) return;
+    if (!fetchUrl) return;
 
     // Proxy URLs need auth fetch to create blob URL
-    if (url.startsWith("/api/whatsapp/media/")) {
+    if (isProxy) {
       try {
-        const res = await fetch(url);
+        const res = await fetch(fetchUrl);
         if (!res.ok) throw new Error(`Failed to load media: ${res.status}`);
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
@@ -76,10 +95,10 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
         setLoading(false);
       }
     } else {
-      setSrc(url);
+      setSrc(fetchUrl);
       setLoading(false);
     }
-  }, [url]);
+  }, [fetchUrl, isProxy]);
 
   useEffect(() => {
     loadImage();
@@ -133,11 +152,13 @@ function MediaVideo({ url }: { url: string }) {
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const { fetchUrl, isProxy } = useMemo(() => resolveMediaUrl(url), [url]);
+
   const loadVideo = useCallback(async () => {
-    if (!url) return;
-    if (url.startsWith("/api/whatsapp/media/")) {
+    if (!fetchUrl) return;
+    if (isProxy) {
       try {
-        const res = await fetch(url);
+        const res = await fetch(fetchUrl);
         if (!res.ok) throw new Error(`Failed to load video: ${res.status}`);
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
@@ -149,10 +170,10 @@ function MediaVideo({ url }: { url: string }) {
         setLoading(false);
       }
     } else {
-      setSrc(url);
+      setSrc(fetchUrl);
       setLoading(false);
     }
-  }, [url]);
+  }, [fetchUrl, isProxy]);
 
   useEffect(() => {
     loadVideo();
@@ -190,11 +211,13 @@ function MediaAudio({ url }: { url: string }) {
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const { fetchUrl, isProxy } = useMemo(() => resolveMediaUrl(url), [url]);
+
   const loadAudio = useCallback(async () => {
-    if (!url) return;
-    if (url.startsWith("/api/whatsapp/media/")) {
+    if (!fetchUrl) return;
+    if (isProxy) {
       try {
-        const res = await fetch(url);
+        const res = await fetch(fetchUrl);
         if (!res.ok) throw new Error(`Failed to load audio: ${res.status}`);
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
@@ -206,10 +229,10 @@ function MediaAudio({ url }: { url: string }) {
         setLoading(false);
       }
     } else {
-      setSrc(url);
+      setSrc(fetchUrl);
       setLoading(false);
     }
-  }, [url]);
+  }, [fetchUrl, isProxy]);
 
   useEffect(() => {
     loadAudio();
@@ -294,7 +317,7 @@ function MessageContent({ message }: { message: Message }) {
       }
       return (
         <a
-          href={message.media_url}
+          href={resolveMediaUrl(message.media_url).fetchUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm hover:bg-muted"

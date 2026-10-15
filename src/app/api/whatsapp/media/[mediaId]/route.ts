@@ -22,9 +22,10 @@ export async function GET(
   { params }: { params: Promise<{ mediaId: string }> }
 ) {
   try {
-    const { mediaId } = await params
+    const rawMediaId = (await params)?.mediaId
+    const cleanMediaId = rawMediaId ? rawMediaId.split('.')[0].split('?')[0] : ''
 
-    if (!mediaId) {
+    if (!cleanMediaId) {
       return NextResponse.json(
         { error: 'Media ID is required' },
         { status: 400 }
@@ -45,13 +46,26 @@ export async function GET(
       )
     }
 
-    // Resolve the caller's account_id
-    const { data: profile } = await supabase
+    const admin = supabaseAdmin()
+
+    // Resolve the caller's account_id via profiles or account_members
+    const { data: profile } = await admin
       .from('profiles')
       .select('account_id')
       .eq('user_id', user.id)
       .maybeSingle()
-    const accountId = profile?.account_id as string | undefined
+
+    let accountId = profile?.account_id as string | undefined
+    if (!accountId) {
+      const { data: member } = await admin
+        .from('account_members')
+        .select('account_id')
+        .eq('user_id', user.id)
+        .limit(1)
+        .maybeSingle()
+      accountId = member?.account_id as string | undefined
+    }
+
     if (!accountId) {
       return NextResponse.json(
         { error: 'Your profile is not linked to an account.' },
@@ -59,8 +73,7 @@ export async function GET(
       )
     }
 
-    const admin = supabaseAdmin()
-    const storagePath = `account-${accountId}/inbound-${mediaId}`
+    const storagePath = `account-${accountId}/inbound-${cleanMediaId}`
 
     // 1. Check if media was already cached in Supabase Storage
     try {
@@ -100,7 +113,7 @@ export async function GET(
     const accessToken = decrypt(config.access_token)
 
     // 3. Get the download URL from Meta
-    const mediaInfo = await getMediaUrl({ mediaId, accessToken })
+    const mediaInfo = await getMediaUrl({ mediaId: cleanMediaId, accessToken })
 
     // 4. Download the binary data
     const { buffer, contentType } = await downloadMedia({
