@@ -65,11 +65,12 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
     if (url.startsWith("/api/whatsapp/media/")) {
       try {
         const res = await fetch(url);
-        if (!res.ok) throw new Error("Failed to load media");
+        if (!res.ok) throw new Error(`Failed to load media: ${res.status}`);
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
         setSrc(blobUrl);
-      } catch {
+      } catch (e) {
+        console.error("[MediaImage] failed to load media image:", e);
         setError(true);
       } finally {
         setLoading(false);
@@ -92,8 +93,19 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
 
   if (error) {
     return (
-      <div className="flex h-40 w-60 items-center justify-center rounded-lg bg-muted">
+      <div className="flex h-40 w-60 flex-col items-center justify-center gap-1 rounded-lg bg-muted p-2 text-center">
         <ImageOff className="h-8 w-8 text-muted-foreground" />
+        <button
+          type="button"
+          onClick={() => {
+            setError(false);
+            setLoading(true);
+            loadImage();
+          }}
+          className="text-xs font-medium text-primary hover:underline"
+        >
+          Retry loading
+        </button>
       </div>
     );
   }
@@ -114,6 +126,114 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
       onError={() => setError(true)}
     />
   );
+}
+
+function MediaVideo({ url }: { url: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const loadVideo = useCallback(async () => {
+    if (!url) return;
+    if (url.startsWith("/api/whatsapp/media/")) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Failed to load video: ${res.status}`);
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        setSrc(blobUrl);
+      } catch (e) {
+        console.error("[MediaVideo] failed to load media video:", e);
+        setError(true);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setSrc(url);
+      setLoading(false);
+    }
+  }, [url]);
+
+  useEffect(() => {
+    loadVideo();
+    return () => {
+      if (src?.startsWith("blob:")) {
+        URL.revokeObjectURL(src);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadVideo]);
+
+  if (error) {
+    return <MediaUnavailable label="Video" />;
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-40 w-60 items-center justify-center rounded-lg bg-muted">
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  return (
+    <video
+      src={src ?? ""}
+      controls
+      className="max-h-64 max-w-60 rounded-lg"
+    />
+  );
+}
+
+function MediaAudio({ url }: { url: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const loadAudio = useCallback(async () => {
+    if (!url) return;
+    if (url.startsWith("/api/whatsapp/media/")) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Failed to load audio: ${res.status}`);
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        setSrc(blobUrl);
+      } catch (e) {
+        console.error("[MediaAudio] failed to load media audio:", e);
+        setError(true);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setSrc(url);
+      setLoading(false);
+    }
+  }, [url]);
+
+  useEffect(() => {
+    loadAudio();
+    return () => {
+      if (src?.startsWith("blob:")) {
+        URL.revokeObjectURL(src);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadAudio]);
+
+  if (error) {
+    return <MediaUnavailable label="Audio" />;
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-12 w-48 items-center justify-center rounded-lg bg-muted">
+        <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  return <audio src={src ?? ""} controls className="max-w-60" />;
 }
 
 function MessageContent({ message }: { message: Message }) {
@@ -145,11 +265,7 @@ function MessageContent({ message }: { message: Message }) {
       return (
         <div>
           {message.media_url ? (
-            <video
-              src={message.media_url}
-              controls
-              className="max-h-64 max-w-60 rounded-lg"
-            />
+            <MediaVideo url={message.media_url} />
           ) : (
             <MediaUnavailable label="Video" />
           )}
@@ -165,7 +281,7 @@ function MessageContent({ message }: { message: Message }) {
       return (
         <div>
           {message.media_url ? (
-            <audio src={message.media_url} controls className="max-w-60" />
+            <MediaAudio url={message.media_url} />
           ) : (
             <MediaUnavailable label="Audio" />
           )}

@@ -77,3 +77,66 @@ describe("sendMediaMessage — payload shape", () => {
     ).rejects.toThrow(/requires a link/);
   });
 });
+
+import { downloadMedia } from "./meta-api";
+
+describe("downloadMedia — headers and retry", () => {
+  it("includes User-Agent and Authorization header", async () => {
+    let requestedHeaders: HeadersInit | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        requestedHeaders = init?.headers;
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "image/jpeg" }),
+          arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+        } as unknown as Response;
+      }),
+    );
+
+    const res = await downloadMedia({
+      downloadUrl: "https://lookaside.fbsbx.com/test",
+      accessToken: "secret-token",
+    });
+
+    expect(res.contentType).toBe("image/jpeg");
+    expect((requestedHeaders as Record<string, string>)["User-Agent"]).toBe("curl/7.64.1");
+    expect((requestedHeaders as Record<string, string>)["Authorization"]).toBe("Bearer secret-token");
+  });
+
+  it("retries without Authorization header if lookaside returns 401 or 403", async () => {
+    const calls: Array<RequestInit | undefined> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        calls.push(init);
+        if (calls.length === 1) {
+          return {
+            ok: false,
+            status: 403,
+            statusText: "Forbidden",
+          } as unknown as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "image/png" }),
+          arrayBuffer: async () => new Uint8Array([4, 5, 6]).buffer,
+        } as unknown as Response;
+      }),
+    );
+
+    const res = await downloadMedia({
+      downloadUrl: "https://lookaside.fbsbx.com/signed-url",
+      accessToken: "secret-token",
+    });
+
+    expect(calls.length).toBe(2);
+    expect((calls[1]?.headers as Record<string, string>)["Authorization"]).toBeUndefined();
+    expect((calls[1]?.headers as Record<string, string>)["User-Agent"]).toBe("curl/7.64.1");
+    expect(res.contentType).toBe("image/png");
+  });
+});
+

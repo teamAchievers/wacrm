@@ -1,7 +1,21 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
+
+// Lazy-initialized admin client to bypass RLS when querying whatsapp_config and caching to storage
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _adminClient: any = null
+function supabaseAdmin() {
+  if (!_adminClient) {
+    _adminClient = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+  }
+  return _adminClient
+}
 
 export async function GET(
   request: Request,
@@ -31,10 +45,7 @@ export async function GET(
       )
     }
 
-    // Resolve the caller's account_id — whatsapp_config is one-per-
-    // account post-multi-user, so a teammate fetching media for a
-    // conversation in the shared inbox needs the account's config,
-    // not their personal (non-existent) row.
+    // Resolve the caller's account_id
     const { data: profile } = await supabase
       .from('profiles')
       .select('account_id')
@@ -48,12 +59,36 @@ export async function GET(
       )
     }
 
-    // Fetch and decrypt WhatsApp config
-    const { data: config, error: configError } = await supabase
+    const admin = supabaseAdmin()
+    const storagePath = `account-${accountId}/inbound-${mediaId}`
+
+    // 1. Check if media was already cached in Supabase Storage
+    try {
+      const { data: cachedBlob, error: downloadErr } = await admin
+        .storage
+        .from('chat-media')
+        .download(storagePath)
+
+      if (!downloadErr && cachedBlob) {
+        const arrayBuffer = await cachedBlob.arrayBuffer()
+        return new Response(new Uint8Array(arrayBuffer), {
+          status: 200,
+          headers: {
+            'Content-Type': cachedBlob.type || 'application/octet-stream',
+            'Cache-Control': 'public, max-age=31536000, immutable',
+          },
+        })
+      }
+    } catch {
+      // Storage cache miss or storage unconfigured — continue to Meta fetch
+    }
+
+    // 2. Fetch and decrypt WhatsApp config via admin client (scoped to user's verified accountId)
+    const { data: config, error: configError } = await admin
       .from('whatsapp_config')
       .select('*')
       .eq('account_id', accountId)
-      .single()
+      .maybeSingle()
 
     if (configError || !config) {
       return NextResponse.json(
@@ -64,19 +99,33 @@ export async function GET(
 
     const accessToken = decrypt(config.access_token)
 
-    // Get the download URL from Meta
+    // 3. Get the download URL from Meta
     const mediaInfo = await getMediaUrl({ mediaId, accessToken })
 
-    // Download the binary data
+    // 4. Download the binary data
     const { buffer, contentType } = await downloadMedia({
       downloadUrl: mediaInfo.url,
       accessToken,
     })
 
+    const finalContentType = contentType || mediaInfo.mimeType || 'application/octet-stream'
+
+    // 5. Cache the downloaded file to chat-media storage bucket asynchronously
+    admin
+      .storage
+      .from('chat-media')
+      .upload(storagePath, buffer, {
+        contentType: finalContentType,
+        upsert: true,
+      })
+      .catch((err: unknown) => {
+        console.warn('[media] failed to cache inbound media to storage:', err)
+      })
+
     return new Response(new Uint8Array(buffer), {
       status: 200,
       headers: {
-        'Content-Type': contentType || mediaInfo.mimeType || 'application/octet-stream',
+        'Content-Type': finalContentType,
         'Cache-Control': 'public, max-age=86400',
       },
     })

@@ -1005,7 +1005,10 @@ export async function getMediaUrl(
 ): Promise<{ url: string; mimeType: string }> {
   const { mediaId, accessToken } = args
   const response = await fetch(`${META_API_BASE}/${mediaId}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'User-Agent': 'curl/7.64.1',
+    },
   })
   if (!response.ok) {
     await throwMetaError(response, `Media fetch failed: ${response.status}`)
@@ -1023,19 +1026,46 @@ export interface DownloadMediaArgs {
 /**
  * Fetch the binary bytes for a media URL obtained from getMediaUrl.
  * Step two of the media-proxy flow.
+ *
+ * Meta's CDN (lookaside.fbsbx.com) blocks requests that omit a trusted
+ * User-Agent (or send Node's default UA). Additionally, some lookaside URLs
+ * use pre-signed HMAC query params and reject explicit Authorization headers.
+ * We include User-Agent: curl/7.64.1 and fallback without Authorization if rejected.
  */
 export async function downloadMedia(
   args: DownloadMediaArgs
 ): Promise<{ buffer: Buffer; contentType: string }> {
   const { downloadUrl, accessToken } = args
-  const response = await fetch(downloadUrl, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+
+  let response = await fetch(downloadUrl, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'User-Agent': 'curl/7.64.1',
+    },
   })
+
+  // Fallback: if lookaside rejected Authorization header with 400/401/403, retry with query-param auth only
+  if (!response.ok && (response.status === 400 || response.status === 401 || response.status === 403)) {
+    try {
+      const retryResponse = await fetch(downloadUrl, {
+        headers: {
+          'User-Agent': 'curl/7.64.1',
+        },
+      })
+      if (retryResponse.ok) {
+        response = retryResponse
+      }
+    } catch {
+      // Keep original response for error throwing below
+    }
+  }
+
   if (!response.ok) {
-    throw new Error(`Media download failed: ${response.status}`)
+    throw new Error(`Media download failed: ${response.status} ${response.statusText}`)
   }
   const contentType =
     response.headers.get('content-type') || 'application/octet-stream'
   const buffer = Buffer.from(await response.arrayBuffer())
   return { buffer, contentType }
 }
+

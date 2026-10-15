@@ -46,6 +46,8 @@ interface WhatsAppMessage {
   sticker?: { id: string; mime_type: string }
   location?: { latitude: number; longitude: number; name?: string; address?: string }
   reaction?: { message_id: string; emoji: string }
+  /** Present when a customer taps a template quick reply button */
+  button?: { payload: string; text: string }
   /**
    * Set when the customer taps a button or list row on an interactive
    * message we sent. `button_reply.id` / `list_reply.id` is whatever id
@@ -613,9 +615,11 @@ async function processMessage(
   ])
   const contentType = ALLOWED_CONTENT_TYPES.has(message.type)
     ? message.type
-    : message.type === 'sticker'
-      ? 'image'   // stickers are images
-      : 'text'    // reaction, unknown → text fallback
+    : message.type === 'button'
+      ? 'interactive' // Quick reply button tap maps to interactive
+      : message.type === 'sticker'
+        ? 'image'   // stickers are images
+        : 'text'    // reaction, unknown → text fallback
 
   // Determine whether this is the contact's very first inbound message
   // BEFORE we insert, so the count is accurate. Covers the case where
@@ -791,7 +795,8 @@ async function parseMessageContent(
         `Failed to verify media ${mediaId} with Meta:`,
         error instanceof Error ? error.message : error
       )
-      return null
+      // Return the proxy URL regardless so inbound media is not dropped due to transient Meta hiccups
+      return `/api/whatsapp/media/${mediaId}`
     }
   }
 
@@ -877,6 +882,20 @@ async function parseMessageContent(
 
     case 'reaction':
       return { ...empty, contentText: message.reaction?.emoji || null }
+
+    case 'button': {
+      // Customer tapped a Quick Reply button on a template or message.
+      // Use the visible text as contentText and the payload/id as interactiveReplyId
+      // so the inbox bubble renders the tap legibly and the Flows engine can advance.
+      const btn = message.button
+      const replyTitle = btn?.text || btn?.payload || '[Button reply]'
+      const replyId = btn?.payload || btn?.text || null
+      return {
+        ...empty,
+        contentText: replyTitle,
+        interactiveReplyId: replyId,
+      }
+    }
 
     case 'interactive': {
       // The customer tapped a reply button or a list row on a message
